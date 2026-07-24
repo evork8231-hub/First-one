@@ -72,10 +72,10 @@ export const clips: ClipDef[] = [
   {
     type: "multi",
     src: "videos/clip-06.mp4",
-    trimIn: 1.5,
+    trimIn: 0.3,
     accentAt: 1.75,
     impactAt: 5.0,
-    trimOut: 5.5,
+    trimOut: 12.1,
   },
 ];
 
@@ -92,7 +92,13 @@ export const clipDurationInFrames = (clip: ClipDef): number => {
 };
 
 export const TRANSITION_FRAMES = 8;
+export const INTRO_DURATION_IN_FRAMES = secToFrames(3);
+
+const segmentDurations = [
+  INTRO_DURATION_IN_FRAMES,
+  ...clips.map(clipDurationInFrames),
+];
 
 export const totalDurationInFrames =
-  clips.reduce((sum, clip) => sum + clipDurationInFrames(clip), 0) -
-  TRANSITION_FRAMES * (clips.length - 1);
+  segmentDurations.reduce((sum, d) => sum + d, 0) -
+  TRANSITION_FRAMES * (segmentDurations.length - 1);
