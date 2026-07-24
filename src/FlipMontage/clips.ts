@@ -95,12 +95,8 @@ export const clipDurationInFrames = (clip: ClipDef): number => {
 };
 
 export const TRANSITION_FRAMES = 8;
-export const INTRO_DURATION_IN_FRAMES = secToFrames(3);
 
-const segmentDurations = [
-  INTRO_DURATION_IN_FRAMES,
-  ...clips.map(clipDurationInFrames),
-];
+const segmentDurations = clips.map(clipDurationInFrames);
 
 export const totalDurationInFrames =
   segmentDurations.reduce((sum, d) => sum + d, 0) -
