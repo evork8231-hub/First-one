@@ -95,8 +95,15 @@ export const clipDurationInFrames = (clip: ClipDef): number => {
 };
 
 export const TRANSITION_FRAMES = 8;
+export const INTRO_DURATION_IN_FRAMES = secToFrames(3);
+export const REPEAT_COUNT = 2;
 
-const segmentDurations = clips.map(clipDurationInFrames);
+const perPlayDurations = clips.map(clipDurationInFrames);
+
+const segmentDurations = [
+  INTRO_DURATION_IN_FRAMES,
+  ...Array(REPEAT_COUNT).fill(perPlayDurations).flat(),
+];
 
 export const totalDurationInFrames =
   segmentDurations.reduce((sum, d) => sum + d, 0) -

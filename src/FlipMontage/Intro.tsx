@@ -45,7 +45,7 @@ export const Intro: React.FC = () => {
         >
           Akrobaatiline
           <br />
-          sünnipäeva tervitus
+          sünnipäevatervitus
         </div>
       </div>
     </AbsoluteFill>
