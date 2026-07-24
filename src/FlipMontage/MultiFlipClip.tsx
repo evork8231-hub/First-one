@@ -1,5 +1,4 @@
 import React from "react";
-import { Audio, Sequence, staticFile } from "remotion";
 import type { MultiFlipClip as MultiFlipClipType } from "./clips";
 import { FPS } from "./clips";
 import { FitVideo } from "./FitVideo";
@@ -11,7 +10,6 @@ export const MultiFlipClip: React.FC<{ clip: MultiFlipClipType }> = ({
   clip,
 }) => {
   const accentFrame = secToFrames(clip.accentAt - clip.trimIn);
-  const impactFrame = secToFrames(clip.impactAt - clip.trimIn);
 
   return (
     <>
@@ -23,12 +21,6 @@ export const MultiFlipClip: React.FC<{ clip: MultiFlipClipType }> = ({
         />
       </ZoomPunch>
       <FlashPulse triggerFrame={accentFrame} />
-      <Sequence from={Math.max(accentFrame - 5, 0)} durationInFrames={secToFrames(1)}>
-        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.9} />
-      </Sequence>
-      <Sequence from={Math.max(impactFrame - 2, 0)} durationInFrames={secToFrames(1)}>
-        <Audio src={staticFile("audio/impact.mp3")} volume={0.9} />
-      </Sequence>
     </>
   );
 };

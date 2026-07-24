@@ -1,5 +1,5 @@
 import React from "react";
-import { Audio, Sequence, staticFile } from "remotion";
+import { Sequence } from "remotion";
 import type { SingleFlipClip as SingleFlipClipType } from "./clips";
 import { FPS } from "./clips";
 import { FitVideo } from "./FitVideo";
@@ -57,18 +57,6 @@ export const SingleFlipClip: React.FC<{ clip: SingleFlipClipType }> = ({
           trimBefore={secToFrames(clip.flipEnd)}
           fit={fit}
         />
-      </Sequence>
-      <Sequence
-        from={Math.max(flipOutFrom - 5, 0)}
-        durationInFrames={secToFrames(1)}
-      >
-        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.9} />
-      </Sequence>
-      <Sequence
-        from={Math.max(landingFrom - 3, 0)}
-        durationInFrames={secToFrames(1)}
-      >
-        <Audio src={staticFile("audio/impact.mp3")} volume={0.9} />
       </Sequence>
     </>
   );
