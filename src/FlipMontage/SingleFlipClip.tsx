@@ -1,21 +1,17 @@
 import React from "react";
-import { Audio, OffthreadVideo, Sequence, staticFile } from "remotion";
+import { Audio, Sequence, staticFile } from "remotion";
 import type { SingleFlipClip as SingleFlipClipType } from "./clips";
 import { FPS } from "./clips";
+import { FitVideo } from "./FitVideo";
 import { FlashPulse, ZoomPunch } from "./effects";
 
 const secToFrames = (s: number) => Math.round(s * FPS);
 const PREMOUNT_FRAMES = 15;
 
-const videoStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-};
-
 export const SingleFlipClip: React.FC<{ clip: SingleFlipClipType }> = ({
   clip,
 }) => {
+  const fit = clip.fit ?? "cover";
   const leadInFrames = secToFrames(clip.flipStart - clip.trimIn);
   const flipOutFrames = secToFrames(
     (clip.flipEnd - clip.flipStart) / clip.slowMoFactor,
@@ -30,10 +26,10 @@ export const SingleFlipClip: React.FC<{ clip: SingleFlipClipType }> = ({
         durationInFrames={leadInFrames}
         premountFor={PREMOUNT_FRAMES}
       >
-        <OffthreadVideo
-          src={staticFile(clip.src)}
+        <FitVideo
+          src={clip.src}
           trimBefore={secToFrames(clip.trimIn)}
-          style={videoStyle}
+          fit={fit}
         />
       </Sequence>
       <Sequence
@@ -42,11 +38,11 @@ export const SingleFlipClip: React.FC<{ clip: SingleFlipClipType }> = ({
         premountFor={PREMOUNT_FRAMES}
       >
         <ZoomPunch triggerFrame={0}>
-          <OffthreadVideo
-            src={staticFile(clip.src)}
+          <FitVideo
+            src={clip.src}
             trimBefore={secToFrames(clip.flipStart)}
             playbackRate={clip.slowMoFactor}
-            style={videoStyle}
+            fit={fit}
           />
         </ZoomPunch>
         <FlashPulse triggerFrame={0} />
@@ -56,10 +52,10 @@ export const SingleFlipClip: React.FC<{ clip: SingleFlipClipType }> = ({
         durationInFrames={landingFrames}
         premountFor={PREMOUNT_FRAMES}
       >
-        <OffthreadVideo
-          src={staticFile(clip.src)}
+        <FitVideo
+          src={clip.src}
           trimBefore={secToFrames(clip.flipEnd)}
-          style={videoStyle}
+          fit={fit}
         />
       </Sequence>
       <Sequence

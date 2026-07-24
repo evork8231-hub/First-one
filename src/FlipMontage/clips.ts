@@ -9,6 +9,7 @@ export type SingleFlipClip = {
   flipEnd: number;
   trimOut: number;
   slowMoFactor: number;
+  fit?: "cover" | "contain";
 };
 
 export type MultiFlipClip = {
@@ -20,6 +21,7 @@ export type MultiFlipClip = {
   /** moment of the final landing, for the impact accent */
   impactAt: number;
   trimOut: number;
+  fit?: "cover" | "contain";
 };
 
 export type ClipDef = SingleFlipClip | MultiFlipClip;
@@ -72,10 +74,11 @@ export const clips: ClipDef[] = [
   {
     type: "multi",
     src: "videos/clip-06.mp4",
-    trimIn: 0.3,
-    accentAt: 1.75,
-    impactAt: 5.0,
-    trimOut: 12.1,
+    trimIn: 3.3,
+    accentAt: 3.85,
+    impactAt: 6.85,
+    trimOut: 7.5,
+    fit: "contain",
   },
 ];
 

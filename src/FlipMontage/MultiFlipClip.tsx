@@ -1,16 +1,11 @@
 import React from "react";
-import { Audio, OffthreadVideo, Sequence, staticFile } from "remotion";
+import { Audio, Sequence, staticFile } from "remotion";
 import type { MultiFlipClip as MultiFlipClipType } from "./clips";
 import { FPS } from "./clips";
+import { FitVideo } from "./FitVideo";
 import { FlashPulse, ZoomPunch } from "./effects";
 
 const secToFrames = (s: number) => Math.round(s * FPS);
-
-const videoStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-};
 
 export const MultiFlipClip: React.FC<{ clip: MultiFlipClipType }> = ({
   clip,
@@ -21,10 +16,10 @@ export const MultiFlipClip: React.FC<{ clip: MultiFlipClipType }> = ({
   return (
     <>
       <ZoomPunch triggerFrame={accentFrame}>
-        <OffthreadVideo
-          src={staticFile(clip.src)}
+        <FitVideo
+          src={clip.src}
           trimBefore={secToFrames(clip.trimIn)}
-          style={videoStyle}
+          fit={clip.fit ?? "cover"}
         />
       </ZoomPunch>
       <FlashPulse triggerFrame={accentFrame} />
