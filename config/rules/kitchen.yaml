@@ -1,0 +1,35 @@
+# Example, illustrative kitchen remodeling rules.
+
+rules:
+  - id: kitchen_remodel_mention
+    name: "Kitchen remodel lead from building record and public mention"
+    description: >
+      A registered building record combined with a public mention of
+      kitchen work indicates a likely kitchen remodeling need. Building
+      age filtering (e.g. requiring an "old" building) is a documented
+      future extension once attribute-level rule conditions are built --
+      the foundation only checks for the record's presence.
+    lead_type: kitchen_remodeling
+    base_confidence: 0.5
+    weight: 1.0
+    enabled: true
+    conditions:
+      - signal_type: building_record
+        min_count: 1
+      - signal_type: kitchen_mention
+        min_count: 1
+
+  - id: kitchen_renovation_listing
+    name: "Kitchen remodel lead from renovation mention and real estate listing"
+    description: >
+      A real estate listing combined with a separate renovation mention
+      corroborates an intent to remodel the kitchen.
+    lead_type: kitchen_remodeling
+    base_confidence: 0.45
+    weight: 0.8
+    enabled: true
+    conditions:
+      - signal_type: real_estate_listing
+        min_count: 1
+      - signal_type: renovation_mention
+        min_count: 1

@@ -1,0 +1,22 @@
+# Example, illustrative solar installation rules.
+
+rules:
+  - id: solar_energy_certificate_opportunity
+    name: "Solar lead from energy certificate and rooftop suitability"
+    description: >
+      An energy performance certificate combined with a public signal
+      indicating rooftop solar suitability together suggest a solar
+      installation opportunity. This rule does not yet filter by the
+      certificate's actual rating band -- attribute-level filtering on
+      signal payload content is a documented future extension
+      (see docs/ARCHITECTURE.md), not implemented in the foundation.
+    lead_type: solar_installation
+    base_confidence: 0.5
+    weight: 1.0
+    enabled: true
+    conditions:
+      - signal_type: energy_certificate
+        min_count: 1
+        max_age_days: 730
+      - signal_type: solar_opportunity
+        min_count: 1

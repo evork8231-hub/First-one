@@ -1,0 +1,57 @@
+# Default structured configuration for the Signal Intelligence Platform.
+#
+# Values here can be overridden per-deployment by environment variables
+# prefixed SIGINT_ (e.g. SIGINT_DATABASE__URL, SIGINT_LOGGING__LEVEL).
+# Environment variables always take precedence over this file -- see
+# app/config/loader.py and docs/CONFIGURATION.md.
+#
+# Secrets (API keys, credentials) must NEVER be added to this file --
+# they are read exclusively from environment variables.
+
+environment: development
+country_code: EE
+
+database:
+  url: "sqlite:///./data/signals.db"
+  echo: false
+
+logging:
+  level: INFO
+  json_logs: false
+  log_file: "logs/app.log"
+  rotation: "10 MB"
+  retention: "30 days"
+
+retry:
+  max_retries: 3
+  initial_backoff_seconds: 0.5
+  backoff_multiplier: 2.0
+  max_backoff_seconds: 30.0
+  jitter_seconds: 0.1
+  timeout_seconds: 60.0
+
+verification:
+  min_signal_confidence: 0.5
+  min_lead_confidence: 0.5
+
+# No collectors ship enabled by default -- the foundation includes no
+# production collector implementations. Enable collectors here by name
+# once they are implemented in a future phase.
+collectors:
+  enabled: []
+
+rules:
+  directory: "config/rules"
+
+scoring:
+  confidence_aggregation: mean
+  weather_confidence_boost_factor: 0.2
+  priority_thresholds:
+    critical: 0.85
+    high: 0.65
+    medium: 0.4
+    low: 0.0
+
+export:
+  default_format: json
+  output_directory: "exports"

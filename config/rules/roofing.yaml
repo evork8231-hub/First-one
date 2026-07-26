@@ -1,0 +1,41 @@
+# Example, illustrative roofing rules. These are starter definitions, not
+# production-tuned rules -- adjust weights and thresholds as real signal
+# data becomes available. See docs/CONFIGURATION.md for the field reference.
+
+rules:
+  - id: roofing_storm_damage
+    name: "Roofing lead from storm damage"
+    description: >
+      A recent severe weather event, a registered building record, and a
+      public mention of roof issues together indicate a likely roofing
+      need. The weather event only scales confidence -- the building
+      record and roof mention are the actual supporting evidence.
+    lead_type: roofing
+    base_confidence: 0.55
+    weight: 1.0
+    enabled: true
+    conditions:
+      - signal_type: weather_event
+        min_count: 1
+        max_age_days: 60
+      - signal_type: building_record
+        min_count: 1
+      - signal_type: roof_mention
+        min_count: 1
+
+  - id: roofing_permit_and_mention
+    name: "Roofing lead from permit activity and public mention"
+    description: >
+      A construction permit filing combined with a separate public
+      mention of roof work is independent corroborating evidence of a
+      roofing project, without requiring a weather trigger.
+    lead_type: roofing
+    base_confidence: 0.6
+    weight: 1.0
+    enabled: true
+    conditions:
+      - signal_type: construction_permit
+        min_count: 1
+        max_age_days: 180
+      - signal_type: roof_mention
+        min_count: 1
