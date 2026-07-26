@@ -68,12 +68,28 @@ coverage) in sequence -- the same gate a CI pipeline should run.
 
 ```bash
 sigint --help
-sigint collect --collector <name>   # fails cleanly: no collector is registered yet
+sigint collect --collector ehitisregister   # run one collector by name
+sigint collect --all                        # run every collector in collectors.enabled, concurrently
 sigint verify signals --limit 100
+sigint verify lead <uuid>
 sigint correlate
 sigint generate
+sigint score                                # inspect stored leads' scores
+sigint stats                                # counts of signals/leads/weather events
 sigint export --format json
+sigint pipeline --export-format csv --output leads.csv   # the whole pipeline in one command
 ```
 
-See [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) for how to add the first real
-collector, verifier, or rule.
+No collector is enabled by default (`collectors.enabled: []` in
+`config/default.yaml`), so `collect`/`pipeline` report "no collectors
+enabled" until you opt one in -- see [`docs/COLLECTORS.md`](COLLECTORS.md)
+for what each one requires before it can run. The real-estate listing
+collectors additionally need a Playwright browser install:
+
+```bash
+playwright install chromium
+```
+
+See [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) for how to add a new
+collector, verifier, rule, or CLI command, and
+[`docs/TESTING.md`](TESTING.md) for the test suite layout.

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+
 from loguru import logger
 
 from app.application.interfaces.collector import CollectorInterface
@@ -10,6 +14,19 @@ from app.core.exceptions import CollectorError
 from app.domain.audit import AuditLogEntry
 from app.domain.enums import AuditEventType, VerificationStatus
 from app.domain.signal import Signal
+
+
+@dataclass(frozen=True)
+class CollectorRunResult:
+    """The outcome of running a single collector as part of a batch."""
+
+    collector_name: str
+    signals: list[Signal] = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.error is None
 
 
 class SignalService:
@@ -56,10 +73,8 @@ class SignalService:
             )
             raise
 
-        stored: list[Signal] = []
-        for signal in signals:
-            stored_signal = self._signal_repository.add(signal)
-            stored.append(stored_signal)
+        stored = self._signal_repository.add_many(signals)
+        for stored_signal in stored:
             self._audit_log_repository.add(
                 AuditLogEntry(
                     event_type=AuditEventType.SIGNAL_INGESTED,
@@ -82,6 +97,37 @@ class SignalService:
             )
         )
         return stored
+
+    async def ingest_from_collectors(
+        self, collectors: Sequence[CollectorInterface], *, max_concurrency: int = 3
+    ) -> list[CollectorRunResult]:
+        """Run every collector in ``collectors`` concurrently, up to ``max_concurrency`` at once.
+
+        Unlike :meth:`ingest_from_collector`, a single collector's failure
+        never aborts the batch -- each result reports its own success or
+        error so a caller (e.g. ``sigint collect --all``) can act on the
+        ones that failed without losing signals already ingested by the
+        ones that succeeded.
+        """
+        semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+        async def _run(collector: CollectorInterface) -> CollectorRunResult:
+            async with semaphore:
+                try:
+                    signals = await self.ingest_from_collector(collector)
+                    return CollectorRunResult(collector_name=collector.name, signals=signals)
+                except CollectorError as exc:
+                    return CollectorRunResult(collector_name=collector.name, error=exc.message)
+
+        results = await asyncio.gather(*(_run(collector) for collector in collectors))
+        logger.info(
+            "Ran {} collector(s) at concurrency {}: {} succeeded, {} failed.",
+            len(results),
+            max_concurrency,
+            sum(1 for r in results if r.succeeded),
+            sum(1 for r in results if not r.succeeded),
+        )
+        return list(results)
 
     def list_unverified(self, *, limit: int = 100, offset: int = 0) -> list[Signal]:
         """Return signals awaiting verification."""

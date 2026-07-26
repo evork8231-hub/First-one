@@ -45,6 +45,22 @@ def test_signal_repository_list_by_ids(sqlite_session_factory) -> None:
     assert [s.id for s in results] == [a.id]
 
 
+def test_signal_repository_add_many_and_count(sqlite_session_factory) -> None:
+    repo = SQLiteSignalRepository(sqlite_session_factory)
+    stored = repo.add_many(
+        [
+            make_signal(county="Harju", verified=VerificationStatus.VERIFIED),
+            make_signal(county="Tartu", verified=VerificationStatus.UNVERIFIED),
+        ]
+    )
+
+    assert len(stored) == 2
+    assert repo.count() == 2
+    assert repo.count(county="Harju") == 1
+    assert repo.count(verified=VerificationStatus.VERIFIED) == 1
+    assert repo.add_many([]) == []
+
+
 def test_lead_repository_crud_roundtrip(sqlite_session_factory) -> None:
     repo = SQLiteLeadRepository(sqlite_session_factory)
     lead = repo.add(make_lead())
@@ -57,6 +73,15 @@ def test_lead_repository_crud_roundtrip(sqlite_session_factory) -> None:
     assert updated.verification_status == VerificationStatus.VERIFIED
 
 
+def test_lead_repository_count_respects_filters(sqlite_session_factory) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    repo.add(make_lead(verification_status=VerificationStatus.VERIFIED))
+    repo.add(make_lead(verification_status=VerificationStatus.UNVERIFIED))
+
+    assert repo.count() == 2
+    assert repo.count(verification_status=VerificationStatus.VERIFIED) == 1
+
+
 def test_weather_repository_roundtrip(sqlite_session_factory) -> None:
     repo = SQLiteWeatherEventRepository(sqlite_session_factory)
     event = repo.add(make_weather_event())
@@ -65,6 +90,15 @@ def test_weather_repository_roundtrip(sqlite_session_factory) -> None:
         county="Harju", since=event.started_at, until=event.ended_at
     )
     assert [e.id for e in results] == [event.id]
+
+
+def test_weather_repository_add_many_and_count(sqlite_session_factory) -> None:
+    repo = SQLiteWeatherEventRepository(sqlite_session_factory)
+    stored = repo.add_many([make_weather_event(), make_weather_event()])
+
+    assert len(stored) == 2
+    assert repo.count() == 2
+    assert repo.add_many([]) == []
 
 
 def test_audit_log_repository_roundtrip(sqlite_session_factory) -> None:

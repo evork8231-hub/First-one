@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -18,6 +19,9 @@ class InMemoryWeatherEventRepository(WeatherEventRepository):
     def add(self, event: WeatherEvent) -> WeatherEvent:
         self._events[event.id] = event
         return event
+
+    def add_many(self, events: Sequence[WeatherEvent]) -> list[WeatherEvent]:
+        return [self.add(event) for event in events]
 
     def get_by_id(self, event_id: UUID) -> WeatherEvent | None:
         return self._events.get(event_id)
@@ -39,3 +43,6 @@ class InMemoryWeatherEventRepository(WeatherEventRepository):
             results = [event for event in results if event.municipality == municipality]
         results.sort(key=lambda event: event.started_at, reverse=True)
         return results
+
+    def count(self) -> int:
+        return len(self._events)

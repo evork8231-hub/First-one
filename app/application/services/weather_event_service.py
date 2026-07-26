@@ -64,10 +64,7 @@ class WeatherEventService:
             )
             raise
 
-        stored: list[WeatherEvent] = []
-        for event in events:
-            stored_event = self._weather_event_repository.add(event)
-            stored.append(stored_event)
+        stored = self._weather_event_repository.add_many(events)
 
         self._audit_log_repository.add(
             AuditLogEntry(

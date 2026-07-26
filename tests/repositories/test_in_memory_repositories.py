@@ -44,6 +44,33 @@ def test_signal_repository_list_filters_by_county() -> None:
     assert results[0].county == "Tartu"
 
 
+def test_signal_repository_add_many_persists_every_signal() -> None:
+    repo = InMemorySignalRepository()
+    signals = [make_signal(), make_signal()]
+
+    stored = repo.add_many(signals)
+
+    assert len(stored) == 2
+    assert repo.count() == 2
+
+
+def test_signal_repository_add_many_empty_is_a_noop() -> None:
+    repo = InMemorySignalRepository()
+    assert repo.add_many([]) == []
+    assert repo.count() == 0
+
+
+def test_signal_repository_count_respects_filters() -> None:
+    repo = InMemorySignalRepository()
+    repo.add(make_signal(county="Harju", verified=VerificationStatus.VERIFIED))
+    repo.add(make_signal(county="Tartu", verified=VerificationStatus.UNVERIFIED))
+
+    assert repo.count() == 2
+    assert repo.count(county="Harju") == 1
+    assert repo.count(verified=VerificationStatus.VERIFIED) == 1
+    assert repo.count(county="Saare") == 0
+
+
 def test_lead_repository_crud_roundtrip() -> None:
     repo = InMemoryLeadRepository()
     lead = repo.add(make_lead())
@@ -57,6 +84,23 @@ def test_lead_repository_update_missing_raises() -> None:
     repo = InMemoryLeadRepository()
     with pytest.raises(EntityNotFoundError):
         repo.update_verification_status(make_lead().id, VerificationStatus.VERIFIED)
+
+
+def test_lead_repository_count_respects_filters() -> None:
+    repo = InMemoryLeadRepository()
+    repo.add(make_lead(verification_status=VerificationStatus.VERIFIED))
+    repo.add(make_lead(verification_status=VerificationStatus.UNVERIFIED))
+
+    assert repo.count() == 2
+    assert repo.count(verification_status=VerificationStatus.VERIFIED) == 1
+
+
+def test_weather_repository_add_many_and_count() -> None:
+    repo = InMemoryWeatherEventRepository()
+    stored = repo.add_many([make_weather_event(), make_weather_event()])
+
+    assert len(stored) == 2
+    assert repo.count() == 2
 
 
 def test_weather_repository_list_by_region_and_time() -> None:

@@ -17,6 +17,9 @@ from app.cli.commands import (
     export_cmd,
     generate_cmd,
     init_cmd,
+    pipeline_cmd,
+    score_cmd,
+    stats_cmd,
     verify_cmd,
 )
 from app.core.container import Container
@@ -42,6 +45,9 @@ app.command("collect")(collect_cmd.collect)
 app.command("correlate")(correlate_cmd.correlate)
 app.command("generate")(generate_cmd.generate)
 app.command("export")(export_cmd.export)
+app.command("score")(score_cmd.score)
+app.command("pipeline")(pipeline_cmd.pipeline)
+app.command("stats")(stats_cmd.stats)
 app.add_typer(verify_cmd.app, name="verify", help="Verify pending Signals or a specific Lead.")
 app.add_typer(config_cmd.app, name="config", help="Inspect and validate configuration.")
 

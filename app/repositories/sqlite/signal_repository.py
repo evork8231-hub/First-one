@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.interfaces.repositories import SignalRepository
@@ -28,6 +28,15 @@ class SQLiteSignalRepository(SignalRepository):
             session.add(model)
             session.flush()
             return model.to_domain()
+
+    def add_many(self, signals: Sequence[Signal]) -> list[Signal]:
+        if not signals:
+            return []
+        with session_scope(self._session_factory) as session:
+            models = [SignalModel.from_domain(signal) for signal in signals]
+            session.add_all(models)
+            session.flush()
+            return [model.to_domain() for model in models]
 
     def get_by_id(self, signal_id: UUID) -> Signal | None:
         with session_scope(self._session_factory) as session:
@@ -75,3 +84,23 @@ class SQLiteSignalRepository(SignalRepository):
             model.verified = status
             session.flush()
             return model.to_domain()
+
+    def count(
+        self,
+        *,
+        service_category: ServiceCategory | None = None,
+        verified: VerificationStatus | None = None,
+        county: str | None = None,
+        municipality: str | None = None,
+    ) -> int:
+        with session_scope(self._session_factory) as session:
+            stmt = select(func.count()).select_from(SignalModel)
+            if service_category is not None:
+                stmt = stmt.where(SignalModel.service_category == service_category)
+            if verified is not None:
+                stmt = stmt.where(SignalModel.verified == verified)
+            if county is not None:
+                stmt = stmt.where(SignalModel.county == county)
+            if municipality is not None:
+                stmt = stmt.where(SignalModel.municipality == municipality)
+            return session.scalar(stmt) or 0

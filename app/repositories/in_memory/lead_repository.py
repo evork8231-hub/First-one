@@ -52,3 +52,22 @@ class InMemoryLeadRepository(LeadRepository):
         updated = existing.with_verification(status)
         self._leads[lead_id] = updated
         return updated
+
+    def count(
+        self,
+        *,
+        lead_type: ServiceCategory | None = None,
+        verification_status: VerificationStatus | None = None,
+        county: str | None = None,
+        municipality: str | None = None,
+    ) -> int:
+        results = list(self._leads.values())
+        if lead_type is not None:
+            results = [lead for lead in results if lead.lead_type == lead_type]
+        if verification_status is not None:
+            results = [lead for lead in results if lead.verification_status == verification_status]
+        if county is not None:
+            results = [lead for lead in results if lead.county == county]
+        if municipality is not None:
+            results = [lead for lead in results if lead.municipality == municipality]
+        return len(results)

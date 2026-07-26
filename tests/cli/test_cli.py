@@ -71,3 +71,133 @@ def test_correlate_reports_zero_matches_on_empty_database(
 
     assert result.exit_code == 0, result.output
     assert "0" in result.output
+
+
+def test_collect_requires_either_collector_or_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["collect"])
+    assert result.exit_code == 2, result.output
+
+
+def test_collect_rejects_collector_and_all_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["collect", "--collector", "x", "--all"])
+    assert result.exit_code == 2, result.output
+
+
+def test_collect_all_with_no_enabled_collectors_reports_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["collect", "--all"])
+    assert result.exit_code == 1, result.output
+    assert "No collectors are enabled" in result.output
+
+
+def test_verify_signals_on_empty_database_reports_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["verify", "signals"])
+
+    assert result.exit_code == 0, result.output
+    assert "No unverified signals" in result.output
+
+
+def test_verify_signals_rejects_a_non_positive_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["verify", "signals", "--limit", "0"])
+    assert result.exit_code == 2, result.output
+
+
+def test_verify_lead_invalid_uuid_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["verify", "lead", "not-a-uuid"])
+    assert result.exit_code == 2, result.output
+
+
+def test_verify_lead_missing_reports_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["verify", "lead", "00000000-0000-0000-0000-000000000000"])
+
+    assert result.exit_code == 1, result.output
+
+
+def test_export_unsupported_format_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["export", "--format", "yaml"])
+    assert result.exit_code == 2, result.output
+
+
+def test_export_xlsx_without_output_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["export", "--format", "xlsx"])
+    assert result.exit_code == 2, result.output
+
+
+def test_export_json_on_empty_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["export", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert "[]" in result.output
+
+
+def test_score_on_empty_database_reports_no_leads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["score"])
+
+    assert result.exit_code == 0, result.output
+    assert "No leads match" in result.output
+
+
+def test_stats_on_empty_database_reports_zero_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["stats"])
+
+    assert result.exit_code == 0, result.output
+    assert "Weather events stored" in result.output
+
+
+def test_pipeline_skip_collect_completes_on_empty_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["pipeline", "--skip-collect"])
+
+    assert result.exit_code == 0, result.output
+    assert "Pipeline complete" in result.output
+
+
+def test_pipeline_rejects_an_unsupported_export_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["pipeline", "--export-format", "yaml"])
+    assert result.exit_code == 2, result.output
+
+
+def test_pipeline_xlsx_export_requires_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["pipeline", "--export-format", "xlsx"])
+    assert result.exit_code == 2, result.output

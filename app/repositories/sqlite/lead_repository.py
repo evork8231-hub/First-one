@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.interfaces.repositories import LeadRepository
@@ -64,3 +64,23 @@ class SQLiteLeadRepository(LeadRepository):
             model.verification_status = status
             session.flush()
             return model.to_domain()
+
+    def count(
+        self,
+        *,
+        lead_type: ServiceCategory | None = None,
+        verification_status: VerificationStatus | None = None,
+        county: str | None = None,
+        municipality: str | None = None,
+    ) -> int:
+        with session_scope(self._session_factory) as session:
+            stmt = select(func.count()).select_from(LeadModel)
+            if lead_type is not None:
+                stmt = stmt.where(LeadModel.lead_type == lead_type)
+            if verification_status is not None:
+                stmt = stmt.where(LeadModel.verification_status == verification_status)
+            if county is not None:
+                stmt = stmt.where(LeadModel.county == county)
+            if municipality is not None:
+                stmt = stmt.where(LeadModel.municipality == municipality)
+            return session.scalar(stmt) or 0

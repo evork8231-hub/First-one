@@ -29,6 +29,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from loguru import logger
 from pydantic import ValidationError
 
 from app.application.interfaces.rule_engine import RuleProvider
@@ -37,10 +38,21 @@ from app.domain.rule import Rule
 
 
 class RuleLoader(RuleProvider):
-    """Loads Rule definitions from every ``*.yaml`` file in a directory."""
+    """Loads Rule definitions from every ``*.yaml`` file in a directory.
 
-    def __init__(self, rules_directory: Path) -> None:
+    Rule files are static metadata for the lifetime of a process (see
+    ``docs/DEVELOPMENT.md`` -- picking up an edited rule file requires a
+    restart), so the parsed result is cached in memory after the first
+    successful ``load_all()`` call rather than re-reading and
+    re-validating every file on every ``correlate``/``generate``/
+    ``pipeline`` invocation. Set ``cache_enabled=False`` to always
+    re-read from disk, or call :meth:`reload` to force one fresh read.
+    """
+
+    def __init__(self, rules_directory: Path, *, cache_enabled: bool = True) -> None:
         self._rules_directory = rules_directory
+        self._cache_enabled = cache_enabled
+        self._cache: list[Rule] | None = None
 
     def load_all(self) -> list[Rule]:
         """Parse and validate every rule file, returning all rules (enabled or not).
@@ -49,6 +61,15 @@ class RuleLoader(RuleProvider):
             ConfigurationError: If the directory is missing, a file is not
                 valid YAML, or a rule fails Pydantic validation.
         """
+        if self._cache_enabled and self._cache is not None:
+            logger.debug(
+                "Rule cache hit for {} ({} rule(s)).", self._rules_directory, len(self._cache)
+            )
+            return self._cache
+        return self.reload()
+
+    def reload(self) -> list[Rule]:
+        """Re-read every rule file from disk, bypassing and refreshing the cache."""
         if not self._rules_directory.is_dir():
             raise ConfigurationError(f"Rules directory does not exist: {self._rules_directory}")
 
@@ -75,6 +96,8 @@ class RuleLoader(RuleProvider):
                 seen_ids.add(rule.id)
                 rules.append(rule)
 
+        logger.debug("Loaded {} rule(s) from {}.", len(rules), self._rules_directory)
+        self._cache = rules
         return rules
 
     def get_active_rules(self) -> list[Rule]:

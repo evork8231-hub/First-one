@@ -16,6 +16,7 @@ from loguru import logger
 
 from app.collectors.rate_limiting import RateLimiter
 from app.config.settings import HttpCollectorConfig
+from app.core.cache import TTLCache
 from app.core.exceptions import CollectorError, CollectorUnavailableError, RetryExhaustedError
 from app.core.retry import RetryPolicy, retry_async
 
@@ -49,6 +50,9 @@ class HttpClient:
         self._rate_limiter = RateLimiter(config.request_delay_seconds)
         self._transport = transport
         self._client: httpx.AsyncClient | None = None
+        self._cache: TTLCache[tuple[str, str, tuple[tuple[str, Any], ...]], Any] | None = (
+            TTLCache(ttl_seconds=config.cache_ttl_seconds) if config.cache_enabled else None
+        )
 
     async def __aenter__(self) -> Self:
         self._client = httpx.AsyncClient(
@@ -78,16 +82,52 @@ class HttpClient:
         object, array, or scalar -- so ``Any`` here reflects reality
         rather than a lazily-typed API.
         """
+        cache_key = self._cache_key("json", url, params)
+        cached = self._cache_lookup(cache_key)
+        if cached is not None:
+            return cached
+
         response = await self._get(url, params=params)
         try:
-            return response.json()
+            value = response.json()
         except json.JSONDecodeError as exc:
             raise CollectorError(f"Response from {url!r} was not valid JSON: {exc}") from exc
+        self._cache_store(cache_key, value)
+        return value
 
     async def get_text(self, url: str, *, params: dict[str, Any] | None = None) -> str:
         """GET ``url`` and return the raw response body text."""
+        cache_key = self._cache_key("text", url, params)
+        cached = self._cache_lookup(cache_key)
+        if cached is not None:
+            return str(cached)
+
         response = await self._get(url, params=params)
+        self._cache_store(cache_key, response.text)
         return response.text
+
+    def _cache_key(
+        self, kind: str, url: str, params: dict[str, Any] | None
+    ) -> tuple[str, str, tuple[tuple[str, Any], ...]]:
+        return (kind, url, tuple(sorted((params or {}).items())))
+
+    def _cache_lookup(
+        self, key: tuple[str, str, tuple[tuple[str, Any], ...]]
+    ) -> Any | None:  # noqa: ANN401
+        if self._cache is None:
+            return None
+        value = self._cache.get(key)
+        if value is not None:
+            logger.debug("HTTP cache hit for {} {}", key[0].upper(), key[1])
+        return value
+
+    def _cache_store(
+        self, key: tuple[str, str, tuple[tuple[str, Any], ...]], value: Any  # noqa: ANN401
+    ) -> None:
+        if self._cache is None:
+            return
+        logger.debug("HTTP cache miss for {} {}; caching response.", key[0].upper(), key[1])
+        self._cache.set(key, value)
 
     async def _get(self, url: str, *, params: dict[str, Any] | None) -> httpx.Response:
         if self._client is None:

@@ -5,10 +5,19 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from app.config.loader import clear_settings_cache
 from app.database.models import Base
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings_cache() -> Iterator[None]:
+    """Keep app.config.loader's in-process settings cache from leaking between tests."""
+    clear_settings_cache()
+    yield
+    clear_settings_cache()
 
 
 @pytest.fixture()

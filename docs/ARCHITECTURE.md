@@ -50,13 +50,25 @@ Correlation -> Lead Generation -> Lead Verification -> Lead Scoring -> Export
 - **Signals** (`app.domain.signal.Signal`) are facts observed at a public
   source. A `Collector` (`app.application.interfaces.collector.CollectorInterface`)
   reads exactly one public source and returns Signals -- nothing else.
-  Collectors never generate, verify, or score Leads.
+  Collectors never generate, verify, or score Leads. Five collectors ship
+  (`app.collectors.ehitisregister_collector`, `ilmateenistus_collector`,
+  and three real-estate listing collectors under `app.collectors.real_estate`)
+  but none run unless explicitly named in `collectors.enabled` -- see
+  [`docs/COLLECTORS.md`](COLLECTORS.md) for what each one does and does not
+  fabricate.
 - **Verification** (`app.application.interfaces.verifier`) advances a
-  Signal or Lead from `UNVERIFIED` to `VERIFIED` or `REJECTED`. The
-  foundation ships structural verifiers only (internal consistency
-  checks); a verifier that cross-references a real external registry is a
-  future phase, since fabricating that behavior now would violate the
-  "never invent API responses" rule.
+  Signal or Lead from `UNVERIFIED` to `VERIFIED` or `REJECTED`.
+  `StructuralSignalVerifier` checks country/county/municipality/postal
+  code/coordinate-bounds consistency; `DuplicateSignalVerifier`
+  (`app.verification.duplicate_detector`) additionally checks a signal
+  against others in the same county/municipality -- by building
+  identifier, phone number, coordinate proximity (haversine distance),
+  then RapidFuzz fuzzy address matching -- producing a
+  Duplicate/Possible-Duplicate/Unique result with every threshold
+  configurable via `VerificationConfig.duplicate_detection`. A verifier
+  that cross-references a real external registry beyond the collector's
+  own source is still a future phase, since fabricating that behavior now
+  would violate the "never invent API responses" rule.
 - **Correlation** (`app.correlation.engine.CorrelationEngine`) consumes
   only `VERIFIED` signals and groups them into `SignalCluster`s by shared
   location identity: building registry code first, then street + house
@@ -81,9 +93,15 @@ Correlation -> Lead Generation -> Lead Verification -> Lead Scoring -> Export
   and `weight` into `intent_score` and `priority`. Neither derives from
   the other.
 - **Export** (`app.application.services.export_service.ExportService`)
-  serializes already-persisted, already-verified Leads to JSON or CSV.
-  This is implemented fully (not a placeholder) because it only
-  serializes existing data -- no external collection, no fabrication risk.
+  serializes already-persisted, already-verified Leads to JSON, CSV, or
+  Excel (`.xlsx`, via openpyxl -- styled/frozen header row, autofilter,
+  auto-sized columns, native numeric/date cell types, all controlled by
+  `ExcelExportConfig`). Every format is implemented fully (not a
+  placeholder) because export only serializes existing data -- no
+  external collection, no fabrication risk. Every format enforces
+  `VerificationStatus.VERIFIED` unconditionally; raw Signals are never
+  exported, only a lead's `Source` column (the distinct collector sources
+  behind its supporting signals).
 
 ## Domain model summary
 
@@ -141,6 +159,39 @@ state transitions (e.g. verification) return a new instance via
   every later `list[X]` annotation in that class. Renaming avoids the
   landmine entirely rather than suppressing the error.
 
+## Performance and reliability
+
+- **Caching is opt-in and process-local, never applied to mutable business
+  data.** `app.core.cache.TTLCache` backs three call sites: HTTP GET
+  responses in `app.collectors.http_client.HttpClient` (off by default,
+  per-collector `cache_enabled`/`cache_ttl_seconds`), `app.rule_engine.loader.RuleLoader`
+  (rule files are static for a process's lifetime, cached after the first
+  successful parse; `reload()` bypasses it), and `app.config.loader.load_settings`
+  (cached per config path + the current `SIGINT_*` environment snapshot,
+  so a changed environment variable always busts the cache). Signals and
+  Leads are never cached -- every read goes through the repository.
+- **Concurrent collectors, bounded and configurable.**
+  `SignalService.ingest_from_collectors` runs multiple collectors under an
+  `asyncio.Semaphore` sized by `concurrency.max_concurrent_collectors`; one
+  collector's `CollectorError` is captured per-collector rather than
+  aborting the whole batch, so `sigint collect --all` and `sigint pipeline`
+  still ingest from every source that succeeded.
+- **Batch inserts.** `SignalRepository.add_many` / `WeatherEventRepository.add_many`
+  persist an entire collector run in one `session.add_all()` + one flush,
+  instead of one round trip per record; `SignalService`/`WeatherEventService`
+  use them while still emitting one audit-log entry per ingested record.
+- **SQLite lock contention.** `database.busy_timeout_seconds` is passed as
+  the SQLite connection's `timeout`, so a write that collides with another
+  connection's lock waits and retries at the driver level instead of
+  raising `database is locked` immediately -- relevant now that collectors
+  and CLI commands can write concurrently.
+- **Retry policy** (`app.core.retry.RetryPolicy`/`retry_async`) is
+  unchanged from the foundation: configurable max retries, exponential
+  backoff with jitter, an overall timeout budget, and an explicit
+  `retry_on` exception filter so permanent failures (4xx HTTP responses)
+  are never retried. `asyncio.CancelledError` always propagates
+  immediately, never treated as retryable.
+
 ## Non-negotiable rules
 
 Enforced in code, not just policy:
@@ -164,13 +215,16 @@ Enforced in code, not just policy:
   registry, a real weather API), it stops at the interface boundary
   instead of faking a response.
 
-## What's explicitly out of scope for this phase
+## What's still explicitly out of scope
 
-Per the mission's STOP CONDITION:
+- No verifier cross-references a real external registry beyond a
+  collector's own declared source (that would require a second, separate
+  data source per verifier -- a deliberate future phase, not fabricated now).
+- No file-watching for rule files or configuration; both are read once per
+  process and cached (see "Performance and reliability" above) -- restart
+  the process to pick up an edited file.
+- No authentication, multi-tenant, or web UI layer -- the CLI is the only
+  presentation surface.
 
-- No production collector (no scraper, no real API client).
-- No live verification against an external registry.
-- No end-to-end pipeline run against real data.
-- No example/fabricated leads.
-
-See the top-level session report for the full "remaining limitations" list.
+See `docs/COLLECTORS.md` for each collector's own, narrower limitations
+(e.g. a schema that could not be confirmed against a live source).

@@ -26,6 +26,14 @@ class DatabaseConfig(BaseModel):
 
     url: str = Field(default="sqlite:///./data/signals.db")
     echo: bool = Field(default=False, description="Log every SQL statement (development only).")
+    busy_timeout_seconds: float = Field(
+        default=5.0,
+        ge=0,
+        description=(
+            "SQLite only: how long a write waits on a lock held by another connection "
+            "before raising 'database is locked', instead of failing immediately."
+        ),
+    )
 
 
 class LoggingConfig(BaseModel):
@@ -180,6 +188,17 @@ class HttpCollectorConfig(BaseModel):
     max_records_per_run: int = Field(
         default=500, ge=1, description="Safety cap on records processed in a single collect() call."
     )
+    cache_enabled: bool = Field(
+        default=False,
+        description=(
+            "Cache GET response bodies in-process for cache_ttl_seconds, keyed by URL and "
+            "query params. Off by default -- only safe to enable where the source's data "
+            "changes slower than a typical collection run cadence."
+        ),
+    )
+    cache_ttl_seconds: float = Field(
+        default=300.0, gt=0, description="How long a cached response stays valid, if caching is on."
+    )
 
 
 class BrowserCollectorConfig(BaseModel):
@@ -263,6 +282,8 @@ class IlmateenistusConfig(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0)
     request_delay_seconds: float = Field(default=1.0, ge=0)
     max_retries: int = Field(default=3, ge=0)
+    cache_enabled: bool = Field(default=False, description="See HttpCollectorConfig.cache_enabled.")
+    cache_ttl_seconds: float = Field(default=300.0, gt=0)
     default_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     wind_severity_reference_ms: float = Field(
         default=25.0,
@@ -319,6 +340,18 @@ class CollectorsConfig(BaseModel):
     @property
     def enabled_set(self) -> frozenset[str]:
         return frozenset(self.enabled)
+
+
+class ConcurrencyConfig(BaseModel):
+    """Bounds on how much work runs in parallel, all operator-adjustable."""
+
+    max_concurrent_collectors: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Maximum number of collectors 'sigint collect --all'/'sigint pipeline' run at once."
+        ),
+    )
 
 
 class RulesConfig(BaseModel):
@@ -411,6 +444,7 @@ class AppSettings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
+    concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
     collectors: CollectorsConfig = Field(default_factory=CollectorsConfig)
     rules: RulesConfig = Field(default_factory=RulesConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)

@@ -14,25 +14,56 @@ only" security requirement.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from app.config.settings import AppSettings
 from app.core.exceptions import ConfigurationError
 
 DEFAULT_CONFIG_PATH = Path("config/default.yaml")
 
+#: Cache of previously resolved settings, keyed by (config path, relevant
+#: environment snapshot) so a change to either -- not just a repeated call
+#: -- always produces a fresh result. Module-level rather than per-caller
+#: because ``load_settings`` is a pure function of its inputs: the YAML
+#: file on disk and the current ``SIGINT_*`` environment.
+_CACHE: dict[tuple[str, tuple[tuple[str, str], ...]], AppSettings] = {}
 
-def load_settings(config_path: Path | None = None) -> AppSettings:
+
+def _env_snapshot() -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((k, v) for k, v in os.environ.items() if k.startswith("SIGINT_")))
+
+
+def clear_settings_cache() -> None:
+    """Drop every cached ``AppSettings`` result. Mainly useful for tests."""
+    _CACHE.clear()
+
+
+def load_settings(config_path: Path | None = None, *, use_cache: bool = True) -> AppSettings:
     """Build an ``AppSettings`` instance from YAML defaults and environment overrides.
+
+    Results are cached in-process, keyed by ``config_path`` and the current
+    ``SIGINT_*`` environment -- parsing YAML and re-validating the merged
+    settings on every call is wasted work when nothing that could change
+    the result has changed. Pass ``use_cache=False`` to always re-read
+    from disk (e.g. after a YAML file is known to have changed on disk
+    within the same process).
 
     Raises:
         ConfigurationError: If the YAML file exists but cannot be parsed,
             or if the merged configuration fails validation.
     """
     path = config_path if config_path is not None else DEFAULT_CONFIG_PATH
+    cache_key = (str(path), _env_snapshot())
+
+    if use_cache and cache_key in _CACHE:
+        logger.debug("Configuration cache hit for {}.", path)
+        return _CACHE[cache_key]
+
     yaml_values = _load_yaml(path)
 
     env_settings = AppSettings()
@@ -41,11 +72,16 @@ def load_settings(config_path: Path | None = None) -> AppSettings:
     merged = _deep_merge(yaml_values, env_overrides)
 
     try:
-        return AppSettings(**merged)
+        settings = AppSettings(**merged)
     except Exception as exc:
         raise ConfigurationError(
             f"Invalid configuration after merging {path} with environment: {exc}"
         ) from exc
+
+    logger.debug("Resolved configuration from {} (cached: {}).", path, use_cache)
+    if use_cache:
+        _CACHE[cache_key] = settings
+    return settings
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

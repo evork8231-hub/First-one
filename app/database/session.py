@@ -26,9 +26,19 @@ def ensure_sqlite_directory(url: str) -> None:
 
 
 def create_sqlalchemy_engine(config: DatabaseConfig) -> Engine:
-    """Build the SQLAlchemy Engine for ``config``."""
+    """Build the SQLAlchemy Engine for ``config``.
+
+    For SQLite, ``timeout`` sets the busy-wait before a lock-contended
+    write raises "database is locked" -- transient contention (e.g. a
+    concurrent collector run and a CLI command writing at the same time)
+    then resolves itself instead of failing on the first collision.
+    """
     ensure_sqlite_directory(config.url)
-    connect_args = {"check_same_thread": False} if config.url.startswith("sqlite") else {}
+    connect_args: dict[str, object] = (
+        {"check_same_thread": False, "timeout": config.busy_timeout_seconds}
+        if config.url.startswith("sqlite")
+        else {}
+    )
     return create_engine(config.url, echo=config.echo, connect_args=connect_args)
 
 

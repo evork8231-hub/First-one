@@ -58,6 +58,21 @@ class SignalRepository(ABC):
     def update_verification(self, signal_id: UUID, status: VerificationStatus) -> Signal:
         """Advance a signal's verification status and return the updated signal."""
 
+    @abstractmethod
+    def add_many(self, signals: Sequence[Signal]) -> list[Signal]:
+        """Persist every signal in ``signals`` as a single batch and return the stored copies."""
+
+    @abstractmethod
+    def count(
+        self,
+        *,
+        service_category: ServiceCategory | None = None,
+        verified: VerificationStatus | None = None,
+        county: str | None = None,
+        municipality: str | None = None,
+    ) -> int:
+        """Return how many signals match the given filters, without loading them."""
+
 
 class LeadRepository(ABC):
     """Persistence boundary for Lead entities."""
@@ -87,6 +102,17 @@ class LeadRepository(ABC):
     def update_verification_status(self, lead_id: UUID, status: VerificationStatus) -> Lead:
         """Advance a lead's verification status and return the updated lead."""
 
+    @abstractmethod
+    def count(
+        self,
+        *,
+        lead_type: ServiceCategory | None = None,
+        verification_status: VerificationStatus | None = None,
+        county: str | None = None,
+        municipality: str | None = None,
+    ) -> int:
+        """Return how many leads match the given filters, without loading them."""
+
 
 class WeatherEventRepository(ABC):
     """Persistence boundary for WeatherEvent entities."""
@@ -94,6 +120,10 @@ class WeatherEventRepository(ABC):
     @abstractmethod
     def add(self, event: WeatherEvent) -> WeatherEvent:
         """Persist a new weather event and return the stored copy."""
+
+    @abstractmethod
+    def add_many(self, events: Sequence[WeatherEvent]) -> list[WeatherEvent]:
+        """Persist every event in ``events`` as a single batch and return the stored copies."""
 
     @abstractmethod
     def get_by_id(self, event_id: UUID) -> WeatherEvent | None:
@@ -109,6 +139,10 @@ class WeatherEventRepository(ABC):
         until: datetime,
     ) -> list[WeatherEvent]:
         """Return weather events affecting the given region within a time window."""
+
+    @abstractmethod
+    def count(self) -> int:
+        """Return how many weather events are currently stored."""
 
 
 class AuditLogRepository(ABC):

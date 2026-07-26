@@ -82,3 +82,47 @@ def test_duplicate_rule_id_raises_configuration_error(tmp_path: Path) -> None:
     _write(tmp_path, "dup.yaml", _VALID_RULE_YAML)
     with pytest.raises(ConfigurationError):
         RuleLoader(tmp_path).load_all()
+
+
+def test_load_all_caches_and_does_not_reread_disk_by_default(tmp_path: Path) -> None:
+    _write(tmp_path, "one.yaml", _VALID_RULE_YAML)
+    loader = RuleLoader(tmp_path)
+
+    first = loader.load_all()
+    (tmp_path / "one.yaml").unlink()  # cache should survive files disappearing
+    second = loader.load_all()
+
+    assert [r.id for r in first] == [r.id for r in second] == ["test_rule_one"]
+
+
+def test_reload_bypasses_the_cache(tmp_path: Path) -> None:
+    _write(tmp_path, "one.yaml", _VALID_RULE_YAML)
+    loader = RuleLoader(tmp_path)
+    loader.load_all()
+
+    _write(tmp_path, "two.yaml", _DISABLED_RULE_YAML)
+    reloaded = loader.reload()
+
+    assert {r.id for r in reloaded} == {"test_rule_one", "test_rule_disabled"}
+    assert {r.id for r in loader.load_all()} == {"test_rule_one", "test_rule_disabled"}
+
+
+def test_cache_disabled_rereads_disk_every_call(tmp_path: Path) -> None:
+    _write(tmp_path, "one.yaml", _VALID_RULE_YAML)
+    loader = RuleLoader(tmp_path, cache_enabled=False)
+    loader.load_all()
+
+    _write(tmp_path, "two.yaml", _DISABLED_RULE_YAML)
+
+    assert {r.id for r in loader.load_all()} == {"test_rule_one", "test_rule_disabled"}
+
+
+def test_a_failed_load_does_not_poison_the_cache(tmp_path: Path) -> None:
+    rules_dir = tmp_path / "rules"
+    loader = RuleLoader(rules_dir)
+    with pytest.raises(ConfigurationError):
+        loader.load_all()
+
+    rules_dir.mkdir()
+    _write(rules_dir, "one.yaml", _VALID_RULE_YAML)
+    assert [r.id for r in loader.load_all()] == ["test_rule_one"]

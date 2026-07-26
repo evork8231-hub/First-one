@@ -21,6 +21,9 @@ class InMemorySignalRepository(SignalRepository):
         self._signals[signal.id] = signal
         return signal
 
+    def add_many(self, signals: Sequence[Signal]) -> list[Signal]:
+        return [self.add(signal) for signal in signals]
+
     def get_by_id(self, signal_id: UUID) -> Signal | None:
         return self._signals.get(signal_id)
 
@@ -59,3 +62,22 @@ class InMemorySignalRepository(SignalRepository):
         updated = existing.with_verification(status)
         self._signals[signal_id] = updated
         return updated
+
+    def count(
+        self,
+        *,
+        service_category: ServiceCategory | None = None,
+        verified: VerificationStatus | None = None,
+        county: str | None = None,
+        municipality: str | None = None,
+    ) -> int:
+        results = list(self._signals.values())
+        if service_category is not None:
+            results = [s for s in results if s.service_category == service_category]
+        if verified is not None:
+            results = [s for s in results if s.verified == verified]
+        if county is not None:
+            results = [s for s in results if s.county == county]
+        if municipality is not None:
+            results = [s for s in results if s.municipality == municipality]
+        return len(results)

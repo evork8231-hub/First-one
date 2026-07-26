@@ -45,6 +45,15 @@ pytest -k test_name                # run a single test
    `config/default.yaml` (or an environment override) to turn it on.
 5. Add unit tests using a fake HTTP layer (e.g. `httpx.MockTransport` or a
    recorded fixture) -- never test against the live source in CI.
+6. If the collector reads over HTTP via `app.collectors.http_client.HttpClient`,
+   response caching is available for free -- add `cache_enabled` /
+   `cache_ttl_seconds` fields to its config model (see `EhitisregisterConfig`)
+   and leave `cache_enabled` defaulting to `false` unless the source's data
+   changes slower than a typical run cadence.
+7. See [`COLLECTORS.md`](COLLECTORS.md) for the narrative guide this list
+   feeds into -- add a section there for the new collector, following the
+   existing format (uses / required settings / known limitations / what
+   it produces).
 
 ## Adding a new verifier
 
@@ -59,10 +68,50 @@ registered verifier to return `VERIFIED` for an entity to pass -- any
 
 Add a YAML entry under `config/rules/` (see
 [`CONFIGURATION.md`](CONFIGURATION.md#rule-files) for the schema). No
-Python change is needed. Rules are hot-reloadable in the sense that
-`RuleLoader.get_active_rules()` re-reads the directory on every call --
-restart the process to pick up a changed file (the foundation does not
-implement file-watching).
+Python change is needed. `RuleLoader` caches the parsed rules after the
+first successful `load_all()`/`get_active_rules()` call within a process
+(see "Caching" below) -- restart the process (or call `RuleLoader.reload()`
+directly) to pick up an edited file; the foundation does not implement
+file-watching.
+
+## Caching
+
+Three call sites cache in-process, all opt-out or naturally self-limiting
+-- see `docs/ARCHITECTURE.md#performance-and-reliability` for the full
+rationale:
+
+- `app.core.cache.TTLCache` is the shared primitive (`get`/`set`/`invalidate`,
+  with hit/miss counters for logging). It is not thread-safe by design and
+  must never be pointed at mutable business data (Signals, Leads).
+- `app.collectors.http_client.HttpClient` caches GET responses when a
+  collector's config sets `cache_enabled: true` (default `false`).
+- `app.rule_engine.loader.RuleLoader` caches parsed rules by default
+  (`cache_enabled=True`); pass `cache_enabled=False` or call `reload()` to
+  bypass it.
+- `app.config.loader.load_settings` caches the resolved `AppSettings` per
+  `(config_path, current SIGINT_* environment)` -- pass `use_cache=False`
+  to force a fresh read, or call `clear_settings_cache()` (used by
+  `tests/conftest.py`'s autouse fixture to keep the test suite hermetic).
+
+## Adding a new CLI command
+
+1. Add `app/cli/commands/<name>_cmd.py`, resolving only DI-container
+   services (`ctx.obj`) -- no business logic in the command itself, per
+   `docs/ARCHITECTURE.md`'s presentation-layer rule.
+2. Validate inputs explicitly and exit with code `2` for a usage error
+   (bad flag combination, invalid value) versus `1` for a runtime failure
+   (e.g. a `CollectorError`/`ExportError` raised deeper in the stack) --
+   see `app/cli/commands/collect_cmd.py` / `export_cmd.py` for the pattern.
+3. Wrap any operation with real latency in a `rich.progress.Progress` --
+   a `SpinnerColumn` for a single indivisible call, a `BarColumn` when
+   there's a genuine per-item count to advance through (see
+   `verify_cmd.verify_signals` / `pipeline_cmd.pipeline`). Progress bars
+   render to the same Rich `Console`, kept separate from Loguru's own
+   stderr sink, so the two never interleave mid-line.
+4. Register the command in `app/cli/main.py`.
+5. Add tests in `tests/cli/test_cli.py` using `typer.testing.CliRunner`,
+   covering at least: `--help` doesn't crash, a validation error exits
+   `2`, and the happy path exits `0` against an empty/fresh SQLite database.
 
 ## Repository backends
 

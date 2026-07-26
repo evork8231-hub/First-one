@@ -107,6 +107,90 @@ def test_server_error_is_retried_then_succeeds() -> None:
     assert call_count["count"] == 3
 
 
+def test_cache_disabled_by_default_hits_the_server_every_time() -> None:
+    call_count = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["count"] += 1
+        return httpx.Response(200, json={"n": call_count["count"]})
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> tuple[object, object]:
+        async with HttpClient(_config(), transport=transport) as client:
+            first = await client.get_json("/data")
+            second = await client.get_json("/data")
+            return first, second
+
+    first, second = asyncio.run(run())
+    assert first == {"n": 1}
+    assert second == {"n": 2}
+    assert call_count["count"] == 2
+
+
+def test_cache_enabled_avoids_a_second_request() -> None:
+    call_count = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["count"] += 1
+        return httpx.Response(200, json={"n": call_count["count"]})
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> tuple[object, object]:
+        config = _config(cache_enabled=True, cache_ttl_seconds=60.0)
+        async with HttpClient(config, transport=transport) as client:
+            first = await client.get_json("/data")
+            second = await client.get_json("/data")
+            return first, second
+
+    first, second = asyncio.run(run())
+    assert first == second == {"n": 1}
+    assert call_count["count"] == 1
+
+
+def test_cache_is_keyed_by_url_and_params() -> None:
+    call_count = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["count"] += 1
+        return httpx.Response(200, json={"n": call_count["count"]})
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> None:
+        config = _config(cache_enabled=True, cache_ttl_seconds=60.0)
+        async with HttpClient(config, transport=transport) as client:
+            await client.get_json("/data", params={"page": 1})
+            await client.get_json("/data", params={"page": 2})
+
+    asyncio.run(run())
+    assert call_count["count"] == 2
+
+
+def test_cache_expires_after_its_ttl() -> None:
+    call_count = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["count"] += 1
+        return httpx.Response(200, json={"n": call_count["count"]})
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> tuple[object, object]:
+        config = _config(cache_enabled=True, cache_ttl_seconds=0.01)
+        async with HttpClient(config, transport=transport) as client:
+            first = await client.get_json("/data")
+            await asyncio.sleep(0.05)
+            second = await client.get_json("/data")
+            return first, second
+
+    first, second = asyncio.run(run())
+    assert first == {"n": 1}
+    assert second == {"n": 2}
+    assert call_count["count"] == 2
+
+
 def test_using_client_without_context_manager_raises() -> None:
     client = HttpClient(_config())
 

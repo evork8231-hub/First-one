@@ -93,6 +93,8 @@ class IlmateenistusCollector(BaseWeatherCollector):
             timeout_seconds=self._config.timeout_seconds,
             request_delay_seconds=self._config.request_delay_seconds,
             max_retries=self._config.max_retries,
+            cache_enabled=self._config.cache_enabled,
+            cache_ttl_seconds=self._config.cache_ttl_seconds,
         )
         async with HttpClient(http_config, retry_policy=self._retry_policy) as client:
             xml_text = await client.get_text(self._config.xml_url)

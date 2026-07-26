@@ -43,3 +43,37 @@ def test_ingest_from_collector_failure_is_audit_logged_and_reraised() -> None:
     assert signal_repo.list_all(limit=10) == []
     event_types = [entry.event_type for entry in audit_repo.list_all(limit=10)]
     assert AuditEventType.COLLECTOR_RUN_FAILED in event_types
+
+
+def test_ingest_from_collectors_runs_every_collector_and_persists_all_signals() -> None:
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = SignalService(signal_repo, audit_repo)
+    collectors = [
+        FakeCollector([make_signal()], name="a"),
+        FakeCollector([make_signal(), make_signal()], name="b"),
+    ]
+
+    results = asyncio.run(service.ingest_from_collectors(collectors, max_concurrency=2))
+
+    assert {r.collector_name for r in results} == {"a", "b"}
+    assert all(r.succeeded for r in results)
+    assert len(signal_repo.list_all(limit=10)) == 3
+
+
+def test_ingest_from_collectors_one_failure_does_not_abort_the_batch() -> None:
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = SignalService(signal_repo, audit_repo)
+    collectors = [
+        FakeCollector([make_signal()], name="good"),
+        FakeCollector([], name="bad", fail=True),
+    ]
+
+    results = asyncio.run(service.ingest_from_collectors(collectors, max_concurrency=2))
+
+    by_name = {r.collector_name: r for r in results}
+    assert by_name["good"].succeeded
+    assert not by_name["bad"].succeeded
+    assert by_name["bad"].error is not None
+    assert len(signal_repo.list_all(limit=10)) == 1

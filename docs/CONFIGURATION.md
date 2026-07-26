@@ -32,6 +32,7 @@ phase's job).
 | `country_code` | ISO country this deployment targets | `EE` |
 | `database.url` | SQLAlchemy connection URL | `sqlite:///./data/signals.db` |
 | `database.echo` | Log every SQL statement | `false` |
+| `database.busy_timeout_seconds` | SQLite only: how long a write waits on a lock before raising "database is locked" | `5.0` |
 | `logging.level` | `TRACE`..`CRITICAL` | `INFO` |
 | `logging.json_logs` | Structured JSON logs instead of text | `false` |
 | `logging.log_file` | Path to a rotating log file, or `null` for stderr only | `logs/app.log` |
@@ -40,13 +41,24 @@ phase's job).
 | `retry.timeout_seconds` | Total wall-clock budget across all attempts | `60.0` |
 | `verification.min_signal_confidence` | Floor enforced by `StructuralSignalVerifier` | `0.5` |
 | `verification.min_lead_confidence` | Floor enforced by `StructuralLeadVerifier` | `0.5` |
+| `verification.require_coordinates` | Reject a signal with no coordinates at all | `false` |
+| `verification.postal_code_pattern` | Regex an Estonian postal code must match, if present | `^\d{5}$` |
+| `verification.coordinate_bounds.*` | Estonia's lat/lon bounding box; coordinates outside it are rejected | `57.5..59.7 N, 21.5..28.2 E` |
+| `verification.duplicate_detection.enabled` | Turn duplicate detection on/off | `true` |
+| `verification.duplicate_detection.comparison_scope_limit` | Max same-county/municipality candidates compared | `200` |
+| `verification.duplicate_detection.coordinate_duplicate_radius_meters` | Distance within which two signals are the same property | `25.0` |
+| `verification.duplicate_detection.fuzzy_duplicate_threshold` / `fuzzy_possible_duplicate_threshold` | RapidFuzz similarity (0-100) for DUPLICATE / POSSIBLE_DUPLICATE | `95.0` / `80.0` |
+| `verification.duplicate_detection.possible_duplicate_policy` | `flag` (keep verifiable) or `reject` a POSSIBLE_DUPLICATE | `flag` |
+| `concurrency.max_concurrent_collectors` | Max collectors `collect --all`/`pipeline` run at once | `3` |
 | `collectors.enabled` | List of registered collector names permitted to run | `[]` |
+| `collectors.<name>.cache_enabled` / `cache_ttl_seconds` | Cache that collector's HTTP GET responses in-process | `false` / `300.0` |
 | `rules.directory` | Where `RuleLoader` reads `*.yaml` files from | `config/rules` |
 | `scoring.confidence_aggregation` | `mean` or `min`, how signal confidences combine into a lead's `estimated_confidence` | `mean` |
 | `scoring.weather_confidence_boost_factor` | How much a matched weather signal scales confidence/intent (never counts as supporting evidence) | `0.2` |
 | `scoring.priority_thresholds` | Minimum `intent_score` per `LeadPriority` | `critical: 0.85, high: 0.65, medium: 0.4, low: 0.0` |
-| `export.default_format` | `json` or `csv` | `json` |
+| `export.default_format` | `json`, `csv`, or `xlsx` | `json` |
 | `export.output_directory` | Default directory for `sigint export --output` | `exports` |
+| `export.excel.*` | Header colors, frozen header, autofilter, column width bounds, date format for `.xlsx` export | see `config/default.yaml` |
 
 ## Rule files
 
@@ -98,44 +110,10 @@ signal data is available.
 a collector fully configured below still will not run via `sigint collect`
 or the DI-resolved registries unless its name is also listed here. Every
 collector additionally validates its own required settings at `collect()`
-time and raises `CollectorError` (never a guess) if they are missing.
-
-### `ehitisregister`
-
-Reads Estonia's Building Registry via the state open-data portal's
-generic Dataset API. `base_url` and `dataset_slug` combine into
-`{base_url}/api/datasets/{dataset_slug}`, which the collector expects to
-return a resource list; it then fetches the first JSON-formatted
-resource. **Known limitation**: the exact response schema of that
-resource could not be confirmed against a live source while building
-this collector -- `field_map` (candidate source JSON key names per
-canonical field, tried in order) is fully operator-adjustable; correct it
-once the real schema is confirmed, without a code change.
-
-### `ilmateenistus`
-
-Reads the Estonian Weather Service's public forecast XML feed and emits
-`WeatherEvent`s (not Signals) for entries matching an explicit severe-weather
-keyword. **`xml_url` has no default and must be set before enabling this
-collector** -- the exact feed URL could not be confirmed against a live
-source. `place_administrative_areas` maps the feed's place names to a
-county/municipality; unmapped places are skipped, not guessed.
-`wind_severity_reference_ms` and `categorical_event_severity` are
-disclosed scoring policy, not values reported by the feed itself.
-
-### `kv_ee`, `kinnisvara24`, `city24`
-
-All three share `BrowserCollectorConfig` and the same collection
-strategy: a headless-browser search page yields listing URLs (via
-`listing_link_selector`, a CSS selector), each listing's schema.org
-JSON-LD is parsed, and an explicit Estonian renovation-indicator phrase
-in the listing's own description text produces a Signal (never inferred
-from price, photos, or building age -- see
-`app.collectors.phrase_matching`). **`search_paths` and
-`listing_link_selector` have no default and must be set per site before
-enabling** -- which URL path lists houses for sale, and which CSS
-selector identifies a listing link, are genuinely site-specific and could
-not be confirmed against the live sites while building these collectors.
+time and raises `CollectorError` (never a guess) if they are missing. See
+[`COLLECTORS.md`](COLLECTORS.md) for what each of the five shipped
+collectors (`ehitisregister`, `ilmateenistus`, `kv_ee`, `kinnisvara24`,
+`city24`) reads, requires before enabling, and does not fabricate.
 
 ## Secrets
 

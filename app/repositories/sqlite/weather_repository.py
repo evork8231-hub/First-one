@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.interfaces.repositories import WeatherEventRepository
@@ -26,6 +27,15 @@ class SQLiteWeatherEventRepository(WeatherEventRepository):
             session.add(model)
             session.flush()
             return model.to_domain()
+
+    def add_many(self, events: Sequence[WeatherEvent]) -> list[WeatherEvent]:
+        if not events:
+            return []
+        with session_scope(self._session_factory) as session:
+            models = [WeatherEventModel.from_domain(event) for event in events]
+            session.add_all(models)
+            session.flush()
+            return [model.to_domain() for model in models]
 
     def get_by_id(self, event_id: UUID) -> WeatherEvent | None:
         with session_scope(self._session_factory) as session:
@@ -50,3 +60,7 @@ class SQLiteWeatherEventRepository(WeatherEventRepository):
                 stmt = stmt.where(WeatherEventModel.municipality == municipality)
             stmt = stmt.order_by(WeatherEventModel.started_at.desc())
             return [model.to_domain() for model in session.scalars(stmt)]
+
+    def count(self) -> int:
+        with session_scope(self._session_factory) as session:
+            return session.scalar(select(func.count()).select_from(WeatherEventModel)) or 0

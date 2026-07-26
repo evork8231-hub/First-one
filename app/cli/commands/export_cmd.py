@@ -7,8 +7,10 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from app.core.container import Container
+from app.core.exceptions import ExportError
 from app.domain.enums import ServiceCategory
 
 console = Console()
@@ -42,19 +44,33 @@ def export(
         console.print(
             f"[red]Unsupported format {export_format!r}; use 'json', 'csv', or 'xlsx'.[/red]"
         )
-        raise typer.Exit(code=1)
-
+        raise typer.Exit(code=2)
+    if limit <= 0:
+        console.print("[red]--limit must be a positive integer.[/red]")
+        raise typer.Exit(code=2)
     if export_format in _BINARY_FORMATS and output is None:
         console.print(f"[red]'--output' is required when exporting as {export_format!r}.[/red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     container: Container = ctx.obj
     service = container.export_service()
-    payload = service.export_leads(
-        export_format=export_format,  # type: ignore[arg-type]
-        lead_type=lead_type,
-        limit=limit,
-    )
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        progress.add_task(f"Exporting leads as {export_format}...", total=None)
+        try:
+            payload = service.export_leads(
+                export_format=export_format,  # type: ignore[arg-type]
+                lead_type=lead_type,
+                limit=limit,
+            )
+        except ExportError as exc:
+            console.print(f"[red]Export failed: {exc.message}[/red]")
+            raise typer.Exit(code=1) from exc
 
     if output is None:
         console.print(payload)
