@@ -34,11 +34,74 @@ verification:
   min_signal_confidence: 0.5
   min_lead_confidence: 0.5
 
-# No collectors ship enabled by default -- the foundation includes no
-# production collector implementations. Enable collectors here by name
-# once they are implemented in a future phase.
+# No collectors ship enabled by default. Add a collector's name to
+# `enabled` only after confirming its site-specific settings below are
+# correct for the live source -- several fields (marked below) could not
+# be verified against a live source while building this configuration and
+# are left unset/best-effort on purpose. See docs/CONFIGURATION.md.
 collectors:
   enabled: []
+
+  ehitisregister:
+    base_url: "https://andmed.eesti.ee"
+    dataset_slug: "ehitisregister"
+    timeout_seconds: 30.0
+    request_delay_seconds: 1.0
+    max_retries: 3
+    max_records_per_run: 500
+    default_confidence: 0.9
+    # field_map: uses built-in defaults (see app/config/settings.py) --
+    # candidate source JSON keys tried in order. Adjust here if the real
+    # dataset resource uses different key names.
+
+  ilmateenistus:
+    base_url: "https://www.ilmateenistus.ee"
+    # REQUIRED before enabling: the exact public forecast XML feed URL
+    # documented at ilmateenistus.ee/teenused/ilmainfo/eesti-prognoos-xml/
+    # could not be confirmed against a live source in this environment.
+    xml_url: null
+    timeout_seconds: 30.0
+    request_delay_seconds: 1.0
+    max_retries: 3
+    default_confidence: 0.8
+    wind_severity_reference_ms: 25.0
+    categorical_event_severity: 0.5
+    # place_administrative_areas: uses built-in defaults (major cities only,
+    # see app/config/settings.py). Forecast places outside this table are
+    # skipped rather than guessed -- extend here as needed.
+
+  kv_ee:
+    base_url: "https://www.kv.ee"
+    timeout_seconds: 30.0
+    request_delay_seconds: 2.0
+    max_retries: 3
+    headless: true
+    max_listings_per_run: 50
+    # REQUIRED before enabling: search_paths and listing_link_selector are
+    # site-specific and could not be confirmed against the live site in
+    # this environment.
+    search_paths: []
+    listing_link_selector: null
+
+  kinnisvara24:
+    base_url: "https://www.kinnisvara24.ee"
+    timeout_seconds: 30.0
+    request_delay_seconds: 2.0
+    max_retries: 3
+    headless: true
+    max_listings_per_run: 50
+    search_paths: []
+    listing_link_selector: null
+
+  city24:
+    base_url: "https://www.city24.ee"
+    timeout_seconds: 30.0
+    request_delay_seconds: 2.0
+    max_retries: 3
+    headless: true
+    max_listings_per_run: 50
+    search_paths: []
+    listing_link_selector: null
 
 rules:
   directory: "config/rules"

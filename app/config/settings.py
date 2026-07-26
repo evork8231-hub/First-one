@@ -71,10 +71,154 @@ class VerificationConfig(BaseModel):
     min_lead_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class HttpCollectorConfig(BaseModel):
+    """Shared operational settings for an httpx-based collector."""
+
+    base_url: str
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    user_agent: str = Field(default="EstoniaSignalIntelligencePlatform/0.1 (public-data collector)")
+    request_delay_seconds: float = Field(
+        default=1.0, ge=0, description="Minimum delay enforced between outbound requests."
+    )
+    max_retries: int = Field(default=3, ge=0)
+    max_records_per_run: int = Field(
+        default=500, ge=1, description="Safety cap on records processed in a single collect() call."
+    )
+
+
+class BrowserCollectorConfig(BaseModel):
+    """Shared operational settings for a Playwright-based listing collector.
+
+    ``listing_link_selector`` and ``search_paths`` have no safe hardcoded
+    default -- they are site-specific CSS selectors and URL paths that must
+    be confirmed against the live site's markup before the collector is
+    enabled. Leaving them empty causes the collector to raise
+    ``CollectorError`` rather than guess a selector.
+    """
+
+    base_url: str
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    user_agent: str = Field(default="EstoniaSignalIntelligencePlatform/0.1 (public-data collector)")
+    request_delay_seconds: float = Field(default=2.0, ge=0)
+    max_retries: int = Field(default=3, ge=0)
+    headless: bool = Field(default=True)
+    max_listings_per_run: int = Field(default=50, ge=1)
+    default_confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Confidence assigned to text-mined phrase signals "
+            "(lower than an authoritative registry)."
+        ),
+    )
+    search_paths: list[str] = Field(default_factory=list)
+    listing_link_selector: str | None = Field(default=None)
+
+
+class EhitisregisterConfig(HttpCollectorConfig):
+    """Settings for the Ehitisregister (Estonian Building Registry) collector.
+
+    ``field_map`` lists, per canonical field, the candidate source JSON key
+    names to try in order -- the exact schema of the discovered dataset
+    resource could not be confirmed against a live source in this
+    environment, so the mapping is fully operator-adjustable rather than
+    hardcoded to a single assumed key name. See
+    ``docs/CONFIGURATION.md#ehitisregister``.
+    """
+
+    base_url: str = "https://andmed.eesti.ee"
+    dataset_slug: str = Field(default="ehitisregister")
+    default_confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+    field_map: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "building_type": ["ehitise_kasutamise_otstarve", "kasutusotstarve", "building_type"],
+            "construction_year": ["ehitusaasta", "valmimisaasta", "construction_year"],
+            "county": ["maakond", "county"],
+            "municipality": ["omavalitsus", "vald", "municipality"],
+            "settlement": ["asustusyksus", "asula", "settlement"],
+            "latitude": ["lat", "latitude", "y_koordinaat"],
+            "longitude": ["lon", "longitude", "x_koordinaat"],
+            "registry_code": ["ehitisregistri_kood", "ehr_kood", "registry_code"],
+            "energy_class": ["energiaklass", "energy_class"],
+            "energy_certificate_valid_until": ["energiamargise_kehtivusaeg", "valid_until"],
+        }
+    )
+
+
+class PlaceAdministrativeArea(BaseModel):
+    """A forecast place name's known Estonian county and municipality."""
+
+    county: str
+    municipality: str
+
+
+class IlmateenistusConfig(BaseModel):
+    """Settings for the Ilmateenistus (Estonian Weather Service) collector.
+
+    ``xml_url`` has no default -- the exact feed URL could not be confirmed
+    against a live source in this environment. The collector raises
+    ``CollectorError`` until an operator sets it explicitly, rather than
+    guessing a path under ``base_url``.
+    """
+
+    base_url: str = "https://www.ilmateenistus.ee"
+    xml_url: str | None = Field(default=None)
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    request_delay_seconds: float = Field(default=1.0, ge=0)
+    max_retries: int = Field(default=3, ge=0)
+    default_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    wind_severity_reference_ms: float = Field(
+        default=25.0,
+        gt=0,
+        description=(
+            "Wind speed, in m/s, treated as maximum severity (1.0) when scaling "
+            "gust-based severity for wind-related events. Approximates Beaufort "
+            "force 10 (storm); not itself a value reported by the feed."
+        ),
+    )
+    categorical_event_severity: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Severity assigned to matched phenomena with no measurable magnitude in the feed."
+        ),
+    )
+    place_administrative_areas: dict[str, PlaceAdministrativeArea] = Field(
+        default_factory=lambda: {
+            "Tallinn": PlaceAdministrativeArea(county="Harju", municipality="Tallinn"),
+            "Tartu": PlaceAdministrativeArea(county="Tartu", municipality="Tartu"),
+            "Pärnu": PlaceAdministrativeArea(county="Pärnu", municipality="Pärnu"),
+            "Narva": PlaceAdministrativeArea(county="Ida-Viru", municipality="Narva"),
+            "Kuressaare": PlaceAdministrativeArea(county="Saare", municipality="Saaremaa"),
+            "Viljandi": PlaceAdministrativeArea(county="Viljandi", municipality="Viljandi"),
+            "Rakvere": PlaceAdministrativeArea(county="Lääne-Viru", municipality="Rakvere"),
+            "Kuressaare linn": PlaceAdministrativeArea(county="Saare", municipality="Saaremaa"),
+        },
+        description=(
+            "Forecast place names not present in this table are skipped -- the "
+            "feed reports place names, not administrative divisions, and this "
+            "platform never guesses a county/municipality."
+        ),
+    )
+
+
 class CollectorsConfig(BaseModel):
-    """Which registered collectors are permitted to run."""
+    """Which registered collectors are permitted to run, and their settings."""
 
     enabled: list[str] = Field(default_factory=list)
+    ehitisregister: EhitisregisterConfig = Field(default_factory=EhitisregisterConfig)
+    ilmateenistus: IlmateenistusConfig = Field(default_factory=IlmateenistusConfig)
+    kv_ee: BrowserCollectorConfig = Field(
+        default_factory=lambda: BrowserCollectorConfig(base_url="https://www.kv.ee")
+    )
+    kinnisvara24: BrowserCollectorConfig = Field(
+        default_factory=lambda: BrowserCollectorConfig(base_url="https://www.kinnisvara24.ee")
+    )
+    city24: BrowserCollectorConfig = Field(
+        default_factory=lambda: BrowserCollectorConfig(base_url="https://www.city24.ee")
+    )
 
     @property
     def enabled_set(self) -> frozenset[str]:

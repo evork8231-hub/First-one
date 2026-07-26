@@ -92,6 +92,51 @@ The shipped files (`roofing.yaml`, `solar.yaml`, `kitchen.yaml`,
 examples -- tune `base_confidence`, `weight`, and thresholds once real
 signal data is available.
 
+## Collectors
+
+`collectors.enabled` (a list of collector names) is the master switch --
+a collector fully configured below still will not run via `sigint collect`
+or the DI-resolved registries unless its name is also listed here. Every
+collector additionally validates its own required settings at `collect()`
+time and raises `CollectorError` (never a guess) if they are missing.
+
+### `ehitisregister`
+
+Reads Estonia's Building Registry via the state open-data portal's
+generic Dataset API. `base_url` and `dataset_slug` combine into
+`{base_url}/api/datasets/{dataset_slug}`, which the collector expects to
+return a resource list; it then fetches the first JSON-formatted
+resource. **Known limitation**: the exact response schema of that
+resource could not be confirmed against a live source while building
+this collector -- `field_map` (candidate source JSON key names per
+canonical field, tried in order) is fully operator-adjustable; correct it
+once the real schema is confirmed, without a code change.
+
+### `ilmateenistus`
+
+Reads the Estonian Weather Service's public forecast XML feed and emits
+`WeatherEvent`s (not Signals) for entries matching an explicit severe-weather
+keyword. **`xml_url` has no default and must be set before enabling this
+collector** -- the exact feed URL could not be confirmed against a live
+source. `place_administrative_areas` maps the feed's place names to a
+county/municipality; unmapped places are skipped, not guessed.
+`wind_severity_reference_ms` and `categorical_event_severity` are
+disclosed scoring policy, not values reported by the feed itself.
+
+### `kv_ee`, `kinnisvara24`, `city24`
+
+All three share `BrowserCollectorConfig` and the same collection
+strategy: a headless-browser search page yields listing URLs (via
+`listing_link_selector`, a CSS selector), each listing's schema.org
+JSON-LD is parsed, and an explicit Estonian renovation-indicator phrase
+in the listing's own description text produces a Signal (never inferred
+from price, photos, or building age -- see
+`app.collectors.phrase_matching`). **`search_paths` and
+`listing_link_selector` have no default and must be set per site before
+enabling** -- which URL path lists houses for sale, and which CSS
+selector identifies a listing link, are genuinely site-specific and could
+not be confirmed against the live sites while building these collectors.
+
 ## Secrets
 
 No secret-backed setting exists yet (no collector requires one). When one

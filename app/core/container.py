@@ -26,12 +26,21 @@ from pathlib import Path
 
 from dependency_injector import containers, providers
 
+from app.application.interfaces.collector import CollectorInterface
+from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.application.services.correlation_service import CorrelationService
 from app.application.services.export_service import ExportService
 from app.application.services.lead_generation_service import LeadGenerationService
 from app.application.services.signal_service import SignalService
 from app.application.services.verification_service import VerificationService
+from app.application.services.weather_event_service import WeatherEventService
+from app.collectors.ehitisregister_collector import EhitisregisterCollector
+from app.collectors.ilmateenistus_collector import IlmateenistusCollector
+from app.collectors.real_estate.city24_collector import City24Collector
+from app.collectors.real_estate.kinnisvara24_collector import Kinnisvara24Collector
+from app.collectors.real_estate.kv_ee_collector import KvEeCollector
 from app.collectors.registry import CollectorRegistry
+from app.collectors.weather_registry import WeatherCollectorRegistry
 from app.config.loader import load_settings
 from app.correlation.engine import CorrelationEngine
 from app.database.session import create_session_factory, create_sqlalchemy_engine
@@ -47,6 +56,24 @@ from app.rule_engine.engine import RuleEngine
 from app.rule_engine.loader import RuleLoader
 from app.verification.structural_lead_verifier import StructuralLeadVerifier
 from app.verification.structural_signal_verifier import StructuralSignalVerifier
+
+
+def _build_collector_registry(*collectors: CollectorInterface) -> CollectorRegistry:
+    """Register every known Signal collector; which ones actually run is a config concern."""
+    registry = CollectorRegistry()
+    for collector in collectors:
+        registry.register(collector)
+    return registry
+
+
+def _build_weather_collector_registry(
+    *collectors: WeatherCollectorInterface,
+) -> WeatherCollectorRegistry:
+    """Register every known weather collector; which ones actually run is a config concern."""
+    registry = WeatherCollectorRegistry()
+    for collector in collectors:
+        registry.register(collector)
+    return registry
 
 
 class Container(containers.DeclarativeContainer):
@@ -73,10 +100,34 @@ class Container(containers.DeclarativeContainer):
     )
 
     # --- Collectors --------------------------------------------------------
-    # Empty by default -- the foundation ships no concrete collector. A
-    # future phase registers real collectors here, e.g.:
-    #   collector_registry.provided.register.call(SomeCollector(...))
-    collector_registry = providers.Singleton(CollectorRegistry)
+    # Every collector is registered regardless of whether it is enabled --
+    # `collectors.enabled` (see CollectorRegistry.list_enabled) is what
+    # actually gates which ones a `collect` run may use.
+    ehitisregister_collector = providers.Singleton(
+        EhitisregisterCollector, config=settings.provided.collectors.ehitisregister
+    )
+    kv_ee_collector = providers.Singleton(KvEeCollector, config=settings.provided.collectors.kv_ee)
+    kinnisvara24_collector = providers.Singleton(
+        Kinnisvara24Collector, config=settings.provided.collectors.kinnisvara24
+    )
+    city24_collector = providers.Singleton(
+        City24Collector, config=settings.provided.collectors.city24
+    )
+    collector_registry = providers.Singleton(
+        _build_collector_registry,
+        ehitisregister_collector,
+        kv_ee_collector,
+        kinnisvara24_collector,
+        city24_collector,
+    )
+
+    ilmateenistus_collector = providers.Singleton(
+        IlmateenistusCollector, config=settings.provided.collectors.ilmateenistus
+    )
+    weather_collector_registry = providers.Singleton(
+        _build_weather_collector_registry,
+        ilmateenistus_collector,
+    )
 
     # --- Verification --------------------------------------------------------
     structural_signal_verifier = providers.Singleton(
@@ -130,3 +181,8 @@ class Container(containers.DeclarativeContainer):
         audit_log_repository=audit_log_repository,
     )
     export_service = providers.Factory(ExportService, lead_repository=lead_repository)
+    weather_event_service = providers.Factory(
+        WeatherEventService,
+        weather_event_repository=weather_event_repository,
+        audit_log_repository=audit_log_repository,
+    )

@@ -1,4 +1,11 @@
-"""Shared scaffolding for concrete Collector implementations."""
+"""Shared scaffolding for concrete WeatherCollector implementations.
+
+Mirrors ``app.collectors.base.BaseCollector`` exactly, for the same
+reasons documented in
+``app.application.interfaces.weather_collector.WeatherCollectorInterface``:
+weather collectors are a distinct interface, not a variant of the signal
+collector interface.
+"""
 
 from __future__ import annotations
 
@@ -7,38 +14,28 @@ from collections.abc import Awaitable, Callable
 
 from loguru import logger
 
-from app.application.interfaces.collector import CollectorInterface
+from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.core.exceptions import CollectorUnavailableError, RetryExhaustedError
 from app.core.retry import RetryPolicy, retry_async
-from app.domain.enums import SignalType
-from app.domain.signal import Signal
+from app.domain.weather import WeatherEvent
 
 
-class BaseCollector(CollectorInterface):
-    """Common bookkeeping for collectors: identity, retry, and logging.
-
-    Concrete subclasses implement :meth:`collect` and may use
-    :meth:`_with_retry` to wrap individual transient operations (e.g. a
-    single HTTP request) in the configured retry policy.
-    """
+class BaseWeatherCollector(WeatherCollectorInterface):
+    """Common bookkeeping for weather collectors: identity, retry, and logging."""
 
     def __init__(
         self,
         *,
         name: str,
         source: str,
-        supported_signal_types: frozenset[SignalType],
         retry_policy: RetryPolicy | None = None,
     ) -> None:
         if not name:
             raise ValueError("Collector name must not be empty.")
         if not source:
             raise ValueError("Collector source must not be empty.")
-        if not supported_signal_types:
-            raise ValueError("Collector must declare at least one supported signal type.")
         self._name = name
         self._source = source
-        self._supported_signal_types = supported_signal_types
         self._retry_policy = retry_policy or RetryPolicy()
 
     @property
@@ -49,19 +46,13 @@ class BaseCollector(CollectorInterface):
     def source(self) -> str:
         return self._source
 
-    @property
-    def supported_signal_types(self) -> frozenset[SignalType]:
-        return self._supported_signal_types
-
     async def _with_retry[T](self, operation: Callable[[], Awaitable[T]]) -> T:
         """Run ``operation`` under this collector's configured retry policy.
 
         Raises:
             CollectorUnavailableError: If every retry attempt fails --
-                translated from ``RetryExhaustedError`` (which is not
-                itself a ``CollectorError``) so ``collect()`` always fails
-                with a ``CollectorError`` subclass, per the
-                ``CollectorInterface`` contract.
+                translated from ``RetryExhaustedError`` so ``collect()``
+                always fails with a ``CollectorError`` subclass.
         """
         try:
             return await retry_async(
@@ -77,6 +68,6 @@ class BaseCollector(CollectorInterface):
             ) from exc
 
     @abstractmethod
-    async def collect(self) -> list[Signal]:
-        """Read the public source and return the Signals it currently reports."""
+    async def collect(self) -> list[WeatherEvent]:
+        """Read the public source and return the WeatherEvents it currently reports."""
         raise NotImplementedError
