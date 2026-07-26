@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.constants import PRIMARY_COUNTRY_CODE
@@ -64,11 +64,107 @@ class RetryConfig(BaseModel):
         )
 
 
+class CoordinateBounds(BaseModel):
+    """A geographic bounding box used to reject coordinates outside Estonia.
+
+    Defaults are Estonia's real, publicly known extent (approximately
+    57.5-59.7 N, 21.5-28.2 E, including the islands) -- a geographic fact,
+    not a business value, but still exposed here so a deployment can
+    adjust it (e.g. to tolerate GPS noise near the border) without a code
+    change.
+    """
+
+    min_latitude: float = Field(default=57.5, ge=-90.0, le=90.0)
+    max_latitude: float = Field(default=59.7, ge=-90.0, le=90.0)
+    min_longitude: float = Field(default=21.5, ge=-180.0, le=180.0)
+    max_longitude: float = Field(default=28.2, ge=-180.0, le=180.0)
+
+    @model_validator(mode="after")
+    def _bounds_must_be_ordered(self) -> CoordinateBounds:
+        if self.max_latitude <= self.min_latitude:
+            raise ValueError("max_latitude must be greater than min_latitude.")
+        if self.max_longitude <= self.min_longitude:
+            raise ValueError("max_longitude must be greater than min_longitude.")
+        return self
+
+    def contains(self, *, latitude: float, longitude: float) -> bool:
+        """Return whether ``(latitude, longitude)`` falls inside this bounding box."""
+        return (
+            self.min_latitude <= latitude <= self.max_latitude
+            and self.min_longitude <= longitude <= self.max_longitude
+        )
+
+
+class DuplicateDetectionConfig(BaseModel):
+    """Configurable thresholds for Signal duplicate detection.
+
+    No similarity value is hardcoded in code -- every threshold used by
+    ``app.verification.duplicate_detector.DuplicateDetector`` is sourced
+    from this model.
+    """
+
+    enabled: bool = Field(default=True)
+    comparison_scope_limit: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Maximum candidate signals fetched (same county/municipality) " "to compare against."
+        ),
+    )
+    coordinate_duplicate_radius_meters: float = Field(
+        default=25.0,
+        ge=0,
+        description=(
+            "Two signals with coordinates within this distance are treated " "as the same property."
+        ),
+    )
+    fuzzy_duplicate_threshold: float = Field(
+        default=95.0,
+        ge=0.0,
+        le=100.0,
+        description="RapidFuzz similarity (0-100) at or above which two signals are a DUPLICATE.",
+    )
+    fuzzy_possible_duplicate_threshold: float = Field(
+        default=80.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "RapidFuzz similarity (0-100) at or above which two signals are "
+            "a POSSIBLE_DUPLICATE."
+        ),
+    )
+    possible_duplicate_policy: Literal["flag", "reject"] = Field(
+        default="flag",
+        description=(
+            "'flag' keeps a POSSIBLE_DUPLICATE signal verifiable (status recorded in the audit "
+            "log); 'reject' treats it the same as an exact DUPLICATE."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _possible_threshold_not_above_duplicate_threshold(self) -> DuplicateDetectionConfig:
+        if self.fuzzy_possible_duplicate_threshold > self.fuzzy_duplicate_threshold:
+            raise ValueError(
+                "fuzzy_possible_duplicate_threshold cannot exceed fuzzy_duplicate_threshold."
+            )
+        return self
+
+
 class VerificationConfig(BaseModel):
     """Thresholds consulted by the structural verifiers."""
 
     min_signal_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     min_lead_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    require_coordinates: bool = Field(
+        default=False,
+        description="Reject a signal that has no coordinates at all. Off by default -- many "
+        "legitimate sources (e.g. listing sites) never publish precise coordinates.",
+    )
+    coordinate_bounds: CoordinateBounds = Field(default_factory=CoordinateBounds)
+    postal_code_pattern: str = Field(
+        default=r"^\d{5}$", description="Regex an Estonian postal code must match, if present."
+    )
+    duplicate_detection: DuplicateDetectionConfig = Field(default_factory=DuplicateDetectionConfig)
 
 
 class HttpCollectorConfig(BaseModel):
@@ -268,11 +364,35 @@ class ScoringConfig(BaseModel):
         return value
 
 
+class ExcelExportConfig(BaseModel):
+    """Formatting options for the ``.xlsx`` export, all operator-adjustable."""
+
+    header_fill_color: str = Field(
+        default="1F4E78", description="Header row background, RRGGBB hex."
+    )
+    header_font_color: str = Field(
+        default="FFFFFF", description="Header row text color, RRGGBB hex."
+    )
+    freeze_header_row: bool = Field(default=True)
+    enable_autofilter: bool = Field(default=True)
+    auto_size_columns: bool = Field(default=True)
+    min_column_width: int = Field(default=10, ge=1)
+    max_column_width: int = Field(default=60, ge=1)
+    date_format: str = Field(default="yyyy-mm-dd hh:mm:ss")
+
+    @model_validator(mode="after")
+    def _column_width_bounds_ordered(self) -> ExcelExportConfig:
+        if self.max_column_width < self.min_column_width:
+            raise ValueError("max_column_width cannot be less than min_column_width.")
+        return self
+
+
 class ExportConfig(BaseModel):
     """Default settings for the ``export`` CLI command."""
 
-    default_format: Literal["json", "csv"] = "json"
+    default_format: Literal["json", "csv", "xlsx"] = "json"
     output_directory: str = Field(default="exports")
+    excel: ExcelExportConfig = Field(default_factory=ExcelExportConfig)
 
 
 class AppSettings(BaseSettings):

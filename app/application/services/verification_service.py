@@ -64,7 +64,10 @@ class VerificationService:
                 entity_type="Signal",
                 entity_id=signal_id,
                 message=f"Signal {signal_id} verification result: {status.value}.",
-                context={"reasons": [r.reason for r in results]},
+                context={
+                    "reasons": [r.reason for r in results],
+                    "evidence": [r.evidence for r in results],
+                },
             )
         )
         return updated
@@ -94,7 +97,10 @@ class VerificationService:
                 entity_type="Lead",
                 entity_id=lead_id,
                 message=f"Lead {lead_id} verification result: {status.value}.",
-                context={"reasons": [r.reason for r in results]},
+                context={
+                    "reasons": [r.reason for r in results],
+                    "evidence": [r.evidence for r in results],
+                },
             )
         )
         return updated

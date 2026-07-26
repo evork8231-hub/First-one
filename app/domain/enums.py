@@ -94,6 +94,7 @@ class AuditEventType(StrEnum):
     SIGNAL_INGESTED = "signal_ingested"
     SIGNAL_VERIFIED = "signal_verified"
     SIGNAL_REJECTED = "signal_rejected"
+    SIGNAL_DUPLICATE_DETECTED = "signal_duplicate_detected"
     CORRELATION_RUN = "correlation_run"
     LEAD_GENERATED = "lead_generated"
     LEAD_VERIFIED = "lead_verified"

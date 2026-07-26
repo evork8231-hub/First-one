@@ -8,10 +8,12 @@ from app.application.interfaces.collector import CollectorInterface
 from app.application.interfaces.lead_generation import LeadGeneratorInterface
 from app.application.interfaces.rule_engine import RuleMatch
 from app.application.interfaces.verifier import LeadVerifier, SignalVerifier, VerificationResult
+from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.core.exceptions import CollectorError
 from app.domain.enums import SignalType, VerificationStatus
 from app.domain.lead import Lead
 from app.domain.signal import Signal
+from app.domain.weather import WeatherEvent
 
 
 class FakeCollector(CollectorInterface):
@@ -50,6 +52,36 @@ class FakeCollector(CollectorInterface):
         if self._fail:
             raise CollectorError("Simulated collector failure.")
         return list(self._signals)
+
+
+class FakeWeatherCollector(WeatherCollectorInterface):
+    """Returns a fixed, pre-built list of WeatherEvents; optionally raises on collect()."""
+
+    def __init__(
+        self,
+        events: Sequence[WeatherEvent],
+        *,
+        name: str = "fake_weather_collector",
+        source: str = "fake_source",
+        fail: bool = False,
+    ) -> None:
+        self._events = list(events)
+        self._name = name
+        self._source = source
+        self._fail = fail
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def source(self) -> str:
+        return self._source
+
+    async def collect(self) -> list[WeatherEvent]:
+        if self._fail:
+            raise CollectorError("Simulated collector failure.")
+        return list(self._events)
 
 
 class FakeSignalVerifier(SignalVerifier):

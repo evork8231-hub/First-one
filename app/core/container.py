@@ -54,6 +54,8 @@ from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
 from app.repositories.sqlite.weather_repository import SQLiteWeatherEventRepository
 from app.rule_engine.engine import RuleEngine
 from app.rule_engine.loader import RuleLoader
+from app.verification.duplicate_detector import DuplicateDetector
+from app.verification.duplicate_signal_verifier import DuplicateSignalVerifier
 from app.verification.structural_lead_verifier import StructuralLeadVerifier
 from app.verification.structural_signal_verifier import StructuralSignalVerifier
 
@@ -133,13 +135,25 @@ class Container(containers.DeclarativeContainer):
     structural_signal_verifier = providers.Singleton(
         StructuralSignalVerifier,
         min_confidence=settings.provided.verification.min_signal_confidence,
+        coordinate_bounds=settings.provided.verification.coordinate_bounds,
+        require_coordinates=settings.provided.verification.require_coordinates,
+        postal_code_pattern=settings.provided.verification.postal_code_pattern,
+    )
+    duplicate_detector = providers.Singleton(
+        DuplicateDetector, config=settings.provided.verification.duplicate_detection
+    )
+    duplicate_signal_verifier = providers.Singleton(
+        DuplicateSignalVerifier,
+        signal_repository=signal_repository,
+        detector=duplicate_detector,
+        config=settings.provided.verification.duplicate_detection,
     )
     structural_lead_verifier = providers.Singleton(
         StructuralLeadVerifier,
         signal_repository=signal_repository,
         min_confidence=settings.provided.verification.min_lead_confidence,
     )
-    signal_verifiers = providers.List(structural_signal_verifier)
+    signal_verifiers = providers.List(structural_signal_verifier, duplicate_signal_verifier)
     lead_verifiers = providers.List(structural_lead_verifier)
 
     # --- Correlation & rules --------------------------------------------------------
@@ -180,7 +194,12 @@ class Container(containers.DeclarativeContainer):
         lead_repository=lead_repository,
         audit_log_repository=audit_log_repository,
     )
-    export_service = providers.Factory(ExportService, lead_repository=lead_repository)
+    export_service = providers.Factory(
+        ExportService,
+        lead_repository=lead_repository,
+        signal_repository=signal_repository,
+        excel_config=settings.provided.export.excel,
+    )
     weather_event_service = providers.Factory(
         WeatherEventService,
         weather_event_repository=weather_event_repository,

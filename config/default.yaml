@@ -33,6 +33,21 @@ retry:
 verification:
   min_signal_confidence: 0.5
   min_lead_confidence: 0.5
+  require_coordinates: false
+  postal_code_pattern: "^\\d{5}$"
+  coordinate_bounds:
+    # Estonia's real, publicly known extent (incl. islands).
+    min_latitude: 57.5
+    max_latitude: 59.7
+    min_longitude: 21.5
+    max_longitude: 28.2
+  duplicate_detection:
+    enabled: true
+    comparison_scope_limit: 200
+    coordinate_duplicate_radius_meters: 25.0
+    fuzzy_duplicate_threshold: 95.0
+    fuzzy_possible_duplicate_threshold: 80.0
+    possible_duplicate_policy: flag
 
 # No collectors ship enabled by default. Add a collector's name to
 # `enabled` only after confirming its site-specific settings below are
@@ -118,3 +133,12 @@ scoring:
 export:
   default_format: json
   output_directory: "exports"
+  excel:
+    header_fill_color: "1F4E78"
+    header_font_color: "FFFFFF"
+    freeze_header_row: true
+    enable_autofilter: true
+    auto_size_columns: true
+    min_column_width: 10
+    max_column_width: 60
+    date_format: "yyyy-mm-dd hh:mm:ss"
