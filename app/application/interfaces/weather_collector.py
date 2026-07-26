@@ -24,7 +24,14 @@ class WeatherCollectorInterface(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """A stable, unique identifier for this collector (e.g. ``"ilmateenistus_forecast"``)."""
+        """A stable, unique identifier for this collector (e.g. ``"ilmateenistus"``).
+
+        Must match this collector's key under ``collectors.<name>`` in
+        configuration -- ``collectors.enabled`` and
+        ``WeatherCollectorRegistry.list_enabled`` both filter by this exact
+        string, so a mismatch here silently makes the collector
+        unenableable.
+        """
 
     @property
     @abstractmethod

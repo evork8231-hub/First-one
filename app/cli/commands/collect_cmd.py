@@ -10,6 +10,7 @@ from loguru import logger
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.application.services.signal_service import CollectorRunResult
 from app.core.container import Container
 from app.core.exceptions import CollectorError, ConfigurationError
@@ -81,9 +82,10 @@ def _collect_one(container: Container, collector_name: str) -> None:
 
 def _collect_all(container: Container) -> None:
     settings = container.settings()
-    registry = container.collector_registry()
-    collectors = registry.list_enabled(settings.collectors.enabled_set)
-    if not collectors:
+    enabled = settings.collectors.enabled_set
+    collectors = container.collector_registry().list_enabled(enabled)
+    weather_collectors = container.weather_collector_registry().list_enabled(enabled)
+    if not collectors and not weather_collectors:
         console.print(
             "[yellow]No collectors are enabled -- set 'collectors.enabled' in configuration "
             "before running 'sigint collect --all'.[/yellow]"
@@ -101,11 +103,17 @@ def _collect_all(container: Container) -> None:
         transient=True,
     ) as progress:
         progress.add_task(
-            f"Collecting from {len(collectors)} source(s) (concurrency={max_concurrency})...",
+            f"Collecting from {len(collectors) + len(weather_collectors)} source(s) "
+            f"(concurrency={max_concurrency})...",
             total=None,
         )
-        results: list[CollectorRunResult] = asyncio.run(
-            service.ingest_from_collectors(collectors, max_concurrency=max_concurrency)
+        results: list[CollectorRunResult] = (
+            asyncio.run(service.ingest_from_collectors(collectors, max_concurrency=max_concurrency))
+            if collectors
+            else []
+        )
+        weather_event_counts, weather_errors = _run_weather_collectors(
+            container, weather_collectors
         )
 
     succeeded = [r for r in results if r.succeeded]
@@ -113,11 +121,46 @@ def _collect_all(container: Container) -> None:
     total_signals = sum(len(r.signals) for r in succeeded)
 
     console.print(
-        f"Ran {len(results)} collector(s): [green]{len(succeeded)} succeeded[/green] "
+        f"Ran {len(results)} signal collector(s): [green]{len(succeeded)} succeeded[/green] "
         f"({total_signals} signal(s) ingested), [red]{len(failed)} failed[/red]."
     )
     for result in failed:
         console.print(f"  [red]- {result.collector_name}: {result.error}[/red]")
 
-    if failed and not succeeded:
+    if weather_collectors:
+        total_events = sum(weather_event_counts.values())
+        console.print(
+            f"Ran {len(weather_collectors)} weather collector(s): "
+            f"{total_events} event(s) ingested, [red]{len(weather_errors)} failed[/red]."
+        )
+        for name, error in weather_errors.items():
+            console.print(f"  [red]- {name}: {error}[/red]")
+
+    any_succeeded = bool(succeeded) or bool(weather_event_counts)
+    any_ran = bool(results) or bool(weather_collectors)
+    if any_ran and not any_succeeded:
         raise typer.Exit(code=1)
+
+
+def _run_weather_collectors(
+    container: Container, weather_collectors: list[WeatherCollectorInterface]
+) -> tuple[dict[str, int], dict[str, str]]:
+    """Run each enabled weather collector, never letting one failure abort the others.
+
+    Mirrors ``SignalService.ingest_from_collectors``' per-collector error
+    isolation, kept as a simple sequential loop here since weather
+    collectors are typically few (one, today) -- see
+    ``app.application.services.weather_event_service.WeatherEventService``
+    for the underlying, already-tested ingestion logic this only calls.
+    """
+    service = container.weather_event_service()
+    event_counts: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    for weather_collector in weather_collectors:
+        try:
+            events = asyncio.run(service.ingest_from_collector(weather_collector))
+            event_counts[weather_collector.name] = len(events)
+        except CollectorError as exc:
+            logger.error("Weather collector {} failed: {}", weather_collector.name, exc.message)
+            errors[weather_collector.name] = exc.message
+    return event_counts, errors

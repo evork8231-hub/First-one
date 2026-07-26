@@ -94,6 +94,59 @@ def test_collect_all_with_no_enabled_collectors_reports_error(
     assert "No collectors are enabled" in result.output
 
 
+def test_collect_all_runs_an_enabled_weather_collector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for the audit finding that --all never ran weather collectors.
+
+    ilmateenistus refuses to run without xml_url configured, so this
+    exercises the real failure path -- proving weather_collector_registry
+    and weather_event_service are actually invoked (they previously were
+    not invoked at all), without needing network access.
+    """
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SIGINT_COLLECTORS__ENABLED", '["ilmateenistus"]')
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["collect", "--all"])
+
+    assert "weather collector(s)" in result.output
+    assert "ilmateenistus" in result.output
+
+
+def test_pipeline_skip_collect_does_not_touch_weather_collectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SIGINT_COLLECTORS__ENABLED", '["ilmateenistus"]')
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["pipeline", "--skip-collect"])
+
+    assert result.exit_code == 0, result.output
+    assert "Pipeline complete" in result.output
+
+
+def test_pipeline_collect_stage_runs_an_enabled_weather_collector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: the pipeline's collect stage previously never ran weather collectors."""
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SIGINT_COLLECTORS__ENABLED", '["ilmateenistus"]')
+    monkeypatch.setenv("SIGINT_LOGGING__LEVEL", "ERROR")
+    runner.invoke(app, ["init"])
+
+    # ilmateenistus fails immediately (no xml_url configured); the pipeline must still
+    # complete (the failure is caught, not propagated) and reach the final stage.
+    result = runner.invoke(app, ["pipeline"])
+
+    assert result.exit_code == 0, result.output
+    assert "Pipeline complete" in result.output
+
+
 def test_verify_signals_on_empty_database_reports_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

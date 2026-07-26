@@ -6,9 +6,10 @@ objects. Collectors never generate leads, never verify leads, never score
 leads, and never contain business logic beyond "read a public source and
 translate what it says into Signals."
 
-The foundation ships no concrete production collector; see
-``app.collectors.base.BaseCollector`` for the shared scaffolding future
-collector implementations build on.
+See ``app.collectors.base.BaseCollector`` for the shared scaffolding
+every concrete collector (``app.collectors.ehitisregister_collector``,
+``app.collectors.real_estate.*``, etc.) builds on -- see
+``docs/COLLECTORS.md`` for what each one does.
 """
 
 from __future__ import annotations

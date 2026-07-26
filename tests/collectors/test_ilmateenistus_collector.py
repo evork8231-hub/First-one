@@ -134,4 +134,6 @@ def test_malformed_xml_raises_collector_error(monkeypatch: pytest.MonkeyPatch) -
 
 def test_collector_identity() -> None:
     collector = IlmateenistusCollector(_config())
-    assert collector.name == "ilmateenistus_forecast"
+    # Must match the "ilmateenistus" key under collectors.<name> in configuration --
+    # collectors.enabled/WeatherCollectorRegistry.list_enabled filter by this exact name.
+    assert collector.name == "ilmateenistus"

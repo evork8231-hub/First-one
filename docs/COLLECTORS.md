@@ -36,8 +36,8 @@ maps fields via `field_map` (see below).
 ## `ilmateenistus` (`rss_jsonld`)
 
 Reads the Estonian Weather Service's public forecast XML feed and emits
-`WeatherEvent`s (never `Signal`s directly -- weather only ever influences
-confidence during correlation, never independently creates a lead).
+`WeatherEvent`s -- never `Signal`s directly (see the known limitation
+below).
 
 - **Uses:** `HttpClient` for the XML fetch (built from the collector's own
   config fields, so `cache_enabled`/`cache_ttl_seconds` apply here too),
@@ -45,6 +45,14 @@ confidence during correlation, never independently creates a lead).
 - **Required before enabling:** `xml_url` has no default -- the exact feed
   URL could not be confirmed against a live source. The collector raises
   `CollectorError` until an operator sets it explicitly.
+- **Known limitation:** `sigint collect --all`/`pipeline` do run this
+  collector (once enabled) and persist its `WeatherEvent`s, but nothing
+  today converts a `WeatherEvent` into a `SignalType.WEATHER_EVENT`
+  `Signal`. Per the mission rule, weather should only ever adjust another
+  signal's confidence, never independently create a lead -- but until
+  this bridge is built, weather cannot influence correlation *at all*,
+  so `config/rules/roofing.yaml`'s `roofing_storm_damage` rule can never
+  match real data. See `docs/ARCHITECTURE.md#whats-still-explicitly-out-of-scope`.
 - **`place_administrative_areas`** maps the feed's place names to a
   county/municipality; unmapped places are skipped, not guessed.
   `wind_severity_reference_ms` and `categorical_event_severity` are
@@ -89,11 +97,14 @@ live site in CI).
 
 ```bash
 sigint collect --collector ehitisregister      # run exactly one, by name
-sigint collect --all                           # run every enabled collector concurrently
+sigint collect --all                           # run every enabled collector (signal + weather)
 ```
 
-`--all` bounds concurrency with `concurrency.max_concurrent_collectors`
-and reports per-collector success/failure without letting one failing
-source abort the others (see `app.application.services.signal_service.SignalService.ingest_from_collectors`).
+`--all` runs both signal collectors (concurrently, bounded by
+`concurrency.max_concurrent_collectors`) and any enabled weather
+collector, reporting per-collector success/failure without letting one
+failing source abort the others (see
+`app.application.services.signal_service.SignalService.ingest_from_collectors`
+and `app.application.services.weather_event_service.WeatherEventService`).
 `sigint pipeline` runs the same collection step as its first stage unless
 `--skip-collect` is given.

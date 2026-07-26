@@ -105,10 +105,14 @@ failed run surfaces in `systemctl status`/`journalctl` the normal way.
   sites that rate-limit or that this platform should be polite to
   regardless (see each collector's `request_delay_seconds` in
   [`COLLECTORS.md`](COLLECTORS.md)).
-- Response caching (`collectors.<name>.cache_enabled`) reduces redundant
-  requests if a scheduled run might overlap with a manual one; it does
-  not replace `request_delay_seconds`, which still governs the pace of
-  first-time (cache-miss) requests.
+- Response caching (`collectors.<name>.cache_enabled`) only helps *within*
+  a single `collect()` call -- a fresh `HttpClient` (and therefore a fresh,
+  empty cache) is constructed every time a collector runs, so it does
+  **not** carry over between separate `sigint collect`/`pipeline`
+  invocations, scheduled or manual. It is only worth enabling for a
+  collector that issues the same request more than once per run (e.g. a
+  paginated fetch); it does not replace `request_delay_seconds`, which
+  still governs the pace of every request regardless of caching.
 
 ## Logs and exports on disk
 

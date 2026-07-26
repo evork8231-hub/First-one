@@ -74,7 +74,7 @@ class IlmateenistusCollector(BaseWeatherCollector):
         self, config: IlmateenistusConfig, *, retry_policy: RetryPolicy | None = None
     ) -> None:
         super().__init__(
-            name="ilmateenistus_forecast",
+            name="ilmateenistus",
             source="Ilmateenistus (Estonian Environment Agency Weather Service)",
             retry_policy=retry_policy or RetryPolicy(max_retries=config.max_retries),
         )

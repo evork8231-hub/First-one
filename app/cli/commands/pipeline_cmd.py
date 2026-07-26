@@ -25,7 +25,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from app.application.interfaces.rule_engine import RuleMatch
 from app.config.settings import AppSettings
 from app.core.container import Container
-from app.core.exceptions import ExportError
+from app.core.exceptions import CollectorError, ExportError
 from app.domain.enums import ServiceCategory
 from app.domain.lead import Lead
 from app.domain.signal import Signal
@@ -126,27 +126,46 @@ def pipeline(
 
 
 def _run_collect_stage(container: Container, settings: AppSettings, progress: Progress) -> None:
-    registry = container.collector_registry()
-    collectors = registry.list_enabled(settings.collectors.enabled_set)
-    if not collectors:
+    enabled = settings.collectors.enabled_set
+    collectors = container.collector_registry().list_enabled(enabled)
+    weather_collectors = container.weather_collector_registry().list_enabled(enabled)
+    if not collectors and not weather_collectors:
         logger.warning("Pipeline: no collectors enabled; skipping collection.")
         return
 
     task = progress.add_task("Collecting signals...", total=None)
-    service = container.signal_service()
-    results = asyncio.run(
-        service.ingest_from_collectors(
-            collectors, max_concurrency=settings.concurrency.max_concurrent_collectors
+    if collectors:
+        signal_service = container.signal_service()
+        results = asyncio.run(
+            signal_service.ingest_from_collectors(
+                collectors, max_concurrency=settings.concurrency.max_concurrent_collectors
+            )
         )
-    )
-    failed = [r for r in results if not r.succeeded]
-    total = sum(len(r.signals) for r in results if r.succeeded)
-    logger.info(
-        "Pipeline collect stage: {} collector(s) run, {} signal(s) ingested, {} failed.",
-        len(results),
-        total,
-        len(failed),
-    )
+        failed = [r for r in results if not r.succeeded]
+        total = sum(len(r.signals) for r in results if r.succeeded)
+        logger.info(
+            "Pipeline collect stage: {} collector(s) run, {} signal(s) ingested, {} failed.",
+            len(results),
+            total,
+            len(failed),
+        )
+
+    if weather_collectors:
+        weather_service = container.weather_event_service()
+        for weather_collector in weather_collectors:
+            try:
+                events = asyncio.run(weather_service.ingest_from_collector(weather_collector))
+                logger.info(
+                    "Pipeline collect stage: weather collector {} ingested {} event(s).",
+                    weather_collector.name,
+                    len(events),
+                )
+            except CollectorError as exc:
+                logger.error(
+                    "Pipeline collect stage: weather collector {} failed: {}",
+                    weather_collector.name,
+                    exc.message,
+                )
     progress.remove_task(task)
 
 
