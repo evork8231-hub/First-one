@@ -35,6 +35,7 @@ from app.application.services.signal_service import SignalService
 from app.application.services.verification_service import VerificationService
 from app.application.services.weather_event_service import WeatherEventService
 from app.collectors.ehitisregister_collector import EhitisregisterCollector
+from app.collectors.ehitisregister_xtee_collector import EhitisregisterXTeeCollector
 from app.collectors.ilmateenistus_collector import IlmateenistusCollector
 from app.collectors.real_estate.city24_collector import City24Collector
 from app.collectors.real_estate.kinnisvara24_collector import Kinnisvara24Collector
@@ -108,6 +109,12 @@ class Container(containers.DeclarativeContainer):
     ehitisregister_collector = providers.Singleton(
         EhitisregisterCollector, config=settings.provided.collectors.ehitisregister
     )
+    # Registered like every other collector, but structurally disabled --
+    # see app.collectors.ehitisregister_xtee_collector for why it always
+    # refuses to run regardless of whether it's listed in collectors.enabled.
+    ehitisregister_xtee_collector = providers.Singleton(
+        EhitisregisterXTeeCollector, config=settings.provided.collectors.ehitisregister_xtee
+    )
     kv_ee_collector = providers.Singleton(KvEeCollector, config=settings.provided.collectors.kv_ee)
     kinnisvara24_collector = providers.Singleton(
         Kinnisvara24Collector, config=settings.provided.collectors.kinnisvara24
@@ -118,6 +125,7 @@ class Container(containers.DeclarativeContainer):
     collector_registry = providers.Singleton(
         _build_collector_registry,
         ehitisregister_collector,
+        ehitisregister_xtee_collector,
         kv_ee_collector,
         kinnisvara24_collector,
         city24_collector,

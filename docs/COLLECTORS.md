@@ -15,7 +15,38 @@ isn't actually present in the response it retrieved, it raises
 guide documents, per collector, exactly what could and could not be
 confirmed against a live source while building it.
 
-## `ehitisregister` (`http_jsonld`)
+## Ehitisregister (Estonian Building Registry) -- two access paths
+
+Ehitisregister (EHR) has two real, government-documented access methods.
+A dedicated production-readiness research pass (web search plus repeated
+live-fetch attempts) established the following, distinguishing what was
+independently corroborated from what remains unverified:
+
+- **The public Open Data portal** (`andmed.eesti.ee`, "Eesti riigi
+  andmete portaal") lists a dataset at
+  `andmed.eesti.ee/datasets/ehitisregister` -- confirmed to exist via
+  multiple independent web searches (a page titled "Ehitisregister" at
+  exactly that URL), requiring no credentials. This is the platform's
+  **preferred** access path: see `ehitisregister` below.
+- **X-tee** (Estonia's secure inter-organizational data-exchange layer,
+  part of the X-Road architecture) is also confirmed real and documented
+  -- a RIHA (State Information System's registry) document titled
+  "Ehitisregistris realiseeritavad x-tee teenused" describes query
+  services implemented by the Building Register, including lookups by
+  building code (`EHR_KOOD`), cadastral/address identifier (`ADS_OID`),
+  and internal technical key (`EHIT_ID`). X-tee access requires the
+  calling party to be a **registered X-tee member** operating a security
+  server with member certificates -- an organizational agreement this
+  platform cannot obtain on an operator's behalf. See
+  `ehitisregister_xtee` below.
+
+An unofficial, commercially-operated "Estonian Building Register API"
+wrapper (hosted on a third-party API marketplace, funded by an unrelated
+company) was also found during research. **It is deliberately not
+used or referenced by any collector in this codebase** -- only the two
+official paths above are implemented.
+
+### `ehitisregister` (Open Data portal, `http_jsonld`) -- preferred, no credentials required
 
 Reads Estonia's Building Registry via the state open-data portal's generic
 Dataset API. `base_url` and `dataset_slug` combine into
@@ -25,13 +56,46 @@ maps fields via `field_map` (see below).
 
 - **Uses:** `app.collectors.http_client.HttpClient` (retry, rate limiting,
   optional response caching -- see `cache_enabled`/`cache_ttl_seconds`).
-- **Known limitation:** the exact response schema of the discovered
-  resource could not be confirmed against a live source while building
-  this collector. `field_map` lists, per canonical field, the candidate
-  source JSON key names to try in order -- fully operator-adjustable in
-  `config/default.yaml` without a code change, once the real schema is
-  confirmed.
+- **Known limitation:** the dataset's existence is corroborated (see
+  above), but its exact response schema was never fetched or confirmed --
+  every attempt to load the live portal or its API docs was blocked at
+  the network/gateway level in every environment this platform has been
+  built in so far, not refused by the source itself. `field_map` lists,
+  per canonical field, the candidate source JSON key names to try in
+  order -- fully operator-adjustable in `config/default.yaml` without a
+  code change, once the real schema is confirmed from a reachable
+  environment.
 - **Produces:** `SignalType.BUILDING_RECORD` signals with `default_confidence`.
+
+### `ehitisregister_xtee` (X-tee adapter) -- disabled by design, requires credentials this platform cannot provide
+
+`app.collectors.ehitisregister_xtee_collector.EhitisregisterXTeeCollector`
+is registered like every other collector but **always raises
+`CollectorError`**, regardless of configuration. It exists as a correctly
+scoped scaffold, not a working integration:
+
+- Its configuration surface
+  (`app.config.settings.EhitisregisterXTeeConfig`) captures the generic,
+  publicly standardized X-Road client/service identity model (member
+  class/code, subsystem, security server, certificates) -- real fields
+  with no defaults, since only an operator's own X-tee membership can
+  supply them.
+- `collect()` validates configuration completeness in three stages
+  (disabled -> missing client identity -> missing target-service
+  identifiers) and, even once every field above is filled in, still
+  refuses to run: **the operation-specific X-tee request/response schema
+  for Ehitisregister's own service was never verified** against a live or
+  documented source. Only the generic X-Road message envelope is a
+  stable public standard; the service-specific body is not, and
+  fabricating it would violate this platform's rule against inventing
+  undocumented API behavior.
+- Enabling this adapter requires **both** listing `ehitisregister_xtee`
+  in `collectors.enabled` **and** setting
+  `collectors.ehitisregister_xtee.enabled: true` -- a deliberate
+  double gate. Completing the integration requires an operator with a
+  real X-tee agreement and Ehitisregister's confirmed WSDL/service
+  catalog to extend `collect()` with the actual request mapping; this
+  file marks exactly where that work begins.
 
 ## `ilmateenistus` (`rss_jsonld`)
 

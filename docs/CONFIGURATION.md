@@ -52,6 +52,8 @@ phase's job).
 | `concurrency.max_concurrent_collectors` | Max collectors `collect --all`/`pipeline` run at once | `3` |
 | `collectors.enabled` | List of registered collector names permitted to run | `[]` |
 | `collectors.<name>.cache_enabled` / `cache_ttl_seconds` | Cache that collector's HTTP GET responses in-process | `false` / `300.0` |
+| `collectors.ehitisregister_xtee.enabled` | Second, explicit gate required (in addition to `collectors.enabled`) before the disabled X-tee adapter even validates its configuration | `false` |
+| `collectors.ehitisregister_xtee.*` | X-Road client/service identity and certificate paths -- no defaults; only meaningful with a real X-tee member agreement. See [`COLLECTORS.md`](COLLECTORS.md#ehitisregister_xtee-x-tee-adapter----disabled-by-design-requires-credentials-this-platform-cannot-provide) | `null` |
 | `rules.directory` | Where `RuleLoader` reads `*.yaml` files from | `config/rules` |
 | `scoring.confidence_aggregation` | `mean` or `min`, how signal confidences combine into a lead's `estimated_confidence` | `mean` |
 | `scoring.weather_confidence_boost_factor` | How much a matched weather signal scales confidence/intent (never counts as supporting evidence) | `0.2` |
@@ -111,9 +113,17 @@ a collector fully configured below still will not run via `sigint collect`
 or the DI-resolved registries unless its name is also listed here. Every
 collector additionally validates its own required settings at `collect()`
 time and raises `CollectorError` (never a guess) if they are missing. See
-[`COLLECTORS.md`](COLLECTORS.md) for what each of the five shipped
-collectors (`ehitisregister`, `ilmateenistus`, `kv_ee`, `kinnisvara24`,
-`city24`) reads, requires before enabling, and does not fabricate.
+[`COLLECTORS.md`](COLLECTORS.md) for what each of the six registered
+collectors (`ehitisregister`, `ehitisregister_xtee`, `ilmateenistus`,
+`kv_ee`, `kinnisvara24`, `city24`) reads, requires before enabling, and
+does not fabricate.
+
+`ehitisregister_xtee` is a special case: it is a **structurally disabled**
+adapter that requires a second, explicit gate
+(`collectors.ehitisregister_xtee.enabled: true`) beyond `collectors.enabled`,
+and even then always refuses to run -- see
+[`COLLECTORS.md`](COLLECTORS.md#ehitisregister_xtee-x-tee-adapter----disabled-by-design-requires-credentials-this-platform-cannot-provide)
+for why.
 
 ## Secrets
 

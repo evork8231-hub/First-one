@@ -261,6 +261,71 @@ class EhitisregisterConfig(HttpCollectorConfig):
     )
 
 
+class EhitisregisterXTeeConfig(BaseModel):
+    """Settings for the disabled X-tee adapter to Ehitisregister.
+
+    X-tee (Estonia's inter-organizational secure data-exchange layer) is a
+    confirmed, real, government-documented access path to Ehitisregister
+    (see ``docs/COLLECTORS.md#ehitisregister``) -- but it requires the
+    calling party to be a registered X-tee member operating a security
+    server with member certificates, which this platform cannot obtain or
+    provision on an operator's behalf. Every field below has no default on
+    purpose: X-tee membership, the security server, and the target
+    service's exact identifiers are things only an operator with a real
+    X-tee agreement can supply. Setting ``enabled: true`` and filling in
+    every field below is still not sufficient to make this collector
+    functional -- see ``EhitisregisterXTeeCollector`` for why.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Must be explicitly set to true, in addition to listing "
+            "'ehitisregister_xtee' in collectors.enabled, before this adapter "
+            "will even attempt to validate its configuration."
+        ),
+    )
+    security_server_url: str | None = Field(
+        default=None, description="This organization's X-tee security server URL."
+    )
+    xroad_instance: str | None = Field(
+        default=None, description="X-Road instance identifier (e.g. an environment name)."
+    )
+    member_class: str | None = Field(
+        default=None, description="This organization's X-Road member class."
+    )
+    member_code: str | None = Field(
+        default=None, description="This organization's X-Road member code."
+    )
+    subsystem_code: str | None = Field(
+        default=None, description="This organization's X-Road subsystem code, if applicable."
+    )
+    client_cert_path: str | None = Field(
+        default=None,
+        description="Path to the client TLS certificate issued for the security server.",
+    )
+    client_key_path: str | None = Field(
+        default=None, description="Path to the private key matching client_cert_path."
+    )
+    service_member_class: str | None = Field(
+        default=None, description="Ehitisregister's X-Road member class, as the service provider."
+    )
+    service_member_code: str | None = Field(
+        default=None, description="Ehitisregister's X-Road member code, as the service provider."
+    )
+    service_subsystem_code: str | None = Field(
+        default=None, description="Ehitisregister's X-Road subsystem code, if applicable."
+    )
+    service_code: str | None = Field(
+        default=None,
+        description=(
+            "The exact X-Road service (operation) name to invoke -- not verified against a "
+            "live source; must come from the operator's own confirmed WSDL/service catalog."
+        ),
+    )
+    service_version: str | None = Field(default=None, description="The X-Road service version.")
+
+
 class PlaceAdministrativeArea(BaseModel):
     """A forecast place name's known Estonian county and municipality."""
 
@@ -326,6 +391,7 @@ class CollectorsConfig(BaseModel):
 
     enabled: list[str] = Field(default_factory=list)
     ehitisregister: EhitisregisterConfig = Field(default_factory=EhitisregisterConfig)
+    ehitisregister_xtee: EhitisregisterXTeeConfig = Field(default_factory=EhitisregisterXTeeConfig)
     ilmateenistus: IlmateenistusConfig = Field(default_factory=IlmateenistusConfig)
     kv_ee: BrowserCollectorConfig = Field(
         default_factory=lambda: BrowserCollectorConfig(base_url="https://www.kv.ee")

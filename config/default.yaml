@@ -78,6 +78,30 @@ collectors:
     # candidate source JSON keys tried in order. Adjust here if the real
     # dataset resource uses different key names.
 
+  # DISABLED BY DESIGN. X-tee is a real, documented alternative access path
+  # to Ehitisregister, but it requires a registered X-tee member agreement,
+  # a security server, and member certificates that this platform cannot
+  # provision -- see docs/COLLECTORS.md#ehitisregister. Every field below
+  # is left unset on purpose; do not fill these in unless you have your
+  # own confirmed X-tee registration and Ehitisregister service access.
+  # Even fully configured, this adapter still refuses to run (see
+  # app/collectors/ehitisregister_xtee_collector.py) because the
+  # operation-specific request/response schema was never verified.
+  ehitisregister_xtee:
+    enabled: false
+    security_server_url: null
+    xroad_instance: null
+    member_class: null
+    member_code: null
+    subsystem_code: null
+    client_cert_path: null
+    client_key_path: null
+    service_member_class: null
+    service_member_code: null
+    service_subsystem_code: null
+    service_code: null
+    service_version: null
+
   ilmateenistus:
     base_url: "https://www.ilmateenistus.ee"
     # REQUIRED before enabling: the exact public forecast XML feed URL

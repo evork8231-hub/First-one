@@ -1,20 +1,32 @@
-"""Ehitisregister (Estonian Building Registry) collector.
+"""Ehitisregister (Estonian Building Registry) collector -- the public Open Data path.
 
 Reads building and (where present) energy-certificate records from
-Estonia's central Building Registry via the state open-data portal's
-generic Dataset API (https://andmed.eesti.ee/api/dataset-docs/), and
-translates them into ``BUILDING_RECORD`` / ``ENERGY_CERTIFICATE`` Signals.
+Estonia's national open-data portal's generic Dataset API
+(https://andmed.eesti.ee/api/dataset-docs/) and translates them into
+``BUILDING_RECORD`` / ``ENERGY_CERTIFICATE`` Signals. This is the
+preferred, unauthenticated access path for Ehitisregister data: unlike
+the X-tee path (see
+``app.collectors.ehitisregister_xtee_collector.EhitisregisterXTeeCollector``,
+which is disabled by design and requires a real X-tee member agreement),
+this portal requires no credentials and no organizational registration.
 
-Known limitation: the exact JSON schema of the discovered dataset
-resource could not be confirmed against a live source in this
-environment (outbound web access was unavailable while building this
-collector). Field extraction goes through
-``EhitisregisterConfig.field_map`` -- a configurable, ordered list of
-candidate source key names per canonical field -- so the mapping can be
-corrected via configuration once the real schema is confirmed, without a
-code change. A record missing a value under every candidate key for a
-*required* Signal field (county, municipality) is skipped, never
-fabricated.
+Verification status (see ``docs/COLLECTORS.md#ehitisregister`` for the
+full research record):
+
+- The dataset's existence at ``andmed.eesti.ee/datasets/ehitisregister``
+  is corroborated by multiple independent web searches (a page titled
+  "Ehitisregister" at exactly that URL), but its content was never
+  directly fetched -- every attempt to load the live portal or its API
+  docs in this environment was blocked at the network/gateway level, not
+  by the source itself refusing the request.
+- The exact JSON schema of the discovered dataset resource is
+  consequently still **unverified**. Field extraction goes through
+  ``EhitisregisterConfig.field_map`` -- a configurable, ordered list of
+  candidate source key names per canonical field -- so the mapping can be
+  corrected via configuration once the real schema is confirmed, without
+  a code change. A record missing a value under every candidate key for
+  a *required* Signal field (county, municipality) is skipped, never
+  fabricated.
 """
 
 from __future__ import annotations
