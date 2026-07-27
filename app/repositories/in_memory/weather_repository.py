@@ -46,3 +46,16 @@ class InMemoryWeatherEventRepository(WeatherEventRepository):
 
     def count(self) -> int:
         return len(self._events)
+
+    def delete_by_source(
+        self, source: str, *, before: datetime | None = None, dry_run: bool = False
+    ) -> int:
+        matching_ids = [
+            eid
+            for eid, event in self._events.items()
+            if event.source == source and (before is None or event.started_at < before)
+        ]
+        if not dry_run:
+            for eid in matching_ids:
+                del self._events[eid]
+        return len(matching_ids)

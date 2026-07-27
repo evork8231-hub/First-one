@@ -69,6 +69,7 @@ sigint correlate                            # find rule matches (no persistence)
 sigint generate                             # correlate + persist leads
 sigint score                                # inspect stored leads' Intent/Confidence/Priority
 sigint stats                                # counts of signals/leads/weather events
+sigint health                               # per-collector last-run status, duration, failure streaks
 sigint export --format xlsx --output leads.xlsx
 sigint pipeline --export-format csv --output leads.csv   # run the whole pipeline end to end
 ```
@@ -77,6 +78,36 @@ Every command supports `--help`, validates its inputs, exits non-zero on
 failure, and uses structured (Loguru) logging throughout. `collect --all`
 and `pipeline` show Rich progress bars for each stage; `collect --all`'s
 concurrency is controlled by `concurrency.max_concurrent_collectors`.
+`collect`/`pipeline` also run a non-blocking schema-drift check after
+ingestion and print a warning if a source's field structure changed since
+its last run (see [`docs/COLLECTORS.md#schema-drift-detection`](docs/COLLECTORS.md#schema-drift-detection)).
+
+### Operator tooling: discovery, verification, and data management
+
+A set of read-only/advisory commands reduce how much manual YAML editing
+and SQL an operator needs before enabling a collector or cleaning up its
+data. None of them fabricate a selector, field, or schema, and none of
+them write configuration or enable a collector on their own -- see
+[`docs/COLLECTORS.md#operator-tooling`](docs/COLLECTORS.md#operator-tooling)
+for the full contract of each:
+
+```bash
+sigint discover-fields                                   # suggest ehitisregister field_map additions from real data
+sigint discover-selectors --html-file page.html           # propose listing-card/link selectors from a saved page
+sigint discover-selectors --url https://... --collector kv_ee   # same, fetched live
+sigint inspect-xml --xml-file feed.xml                    # visualize an XML feed's real element structure
+sigint inspect-xml --url https://... --interactive         # same, fetched live, with a field-by-field review
+sigint verify-collector ehitisregister                    # run a collector for real; READY/NOT READY report
+sigint health                                              # per-collector last-run status/duration/failures
+sigint purge signals --source <name>                       # preview (dry-run) deleting signals from a source
+sigint purge signals --source <name> --yes                 # actually delete them
+sigint purge weather-events --source <name> --before 2026-01-01 --yes
+```
+
+`purge` always previews before deleting -- pass `--yes` to actually
+remove data, and every real deletion is audit logged. `verify-collector`
+exits `0` for READY and non-zero for NOT READY/BLOCKED, so it can gate a
+deployment script.
 
 ## Project structure
 

@@ -172,3 +172,130 @@ failing source abort the others (see
 and `app.application.services.weather_event_service.WeatherEventService`).
 `sigint pipeline` runs the same collection step as its first stage unless
 `--skip-collect` is given.
+
+## Schema drift detection
+
+`sigint collect`/`sigint pipeline` fingerprint every signal-producing
+collector's run by the set of raw-payload keys its Signals actually
+carried (`Signal.raw_payload` -- the unmodified source record every
+collector stores), and compare that set against the fingerprint from the
+collector's previous run (`app.verification.schema_drift.SchemaDriftDetector`,
+stored via `ConfigurationRepository` under
+`schema_fingerprint.<collector_name>`). If the key set changed -- fields
+added or removed -- a warning is printed and a `SCHEMA_DRIFT_DETECTED`
+audit log entry is written, then the fingerprint updates to the new key
+set so the same drift is not re-reported on every subsequent run.
+
+This is diagnostic only: it never blocks a run, never changes what was
+ingested, and never modifies configuration. A drift warning means "the
+source's structure changed since last time -- check whether the
+collector's `field_map`/selectors/parsing still make sense," not that
+anything failed.
+
+Deliberately **not** applied to the `ilmateenistus` weather collector:
+`WeatherEvent.raw_payload` is a fixed-key dict `IlmateenistusCollector`
+itself constructs from parsed fields (`place`, `phenomenon`, `text`,
+`date`, `period`, `wind_gust_ms`), not the source feed's own structure --
+its key set never changes regardless of what the real XML looks like, so
+checking it would report false confidence rather than real drift. Use
+`sigint inspect-xml` (below) to check the Ilmateenistus feed's actual
+structure instead.
+
+## Operator tooling
+
+A set of read-only, advisory CLI commands reduce how much manual YAML
+editing and direct SQL an operator needs to enable a collector safely.
+Every one of them only reports findings or executes a collector's
+existing, already-tested `collect()` -- none of them write configuration,
+invent a selector/field/schema, or enable a collector on their own.
+
+### `sigint discover-fields` -- field_map suggestions (Ehitisregister)
+
+Samples a few real records from the Ehitisregister Open Data resource
+(`EhitisregisterCollector.sample_raw_records`) and, for every JSON key the
+currently configured `collectors.ehitisregister.field_map` does not
+account for, suggests which canonical field it might belong to --
+ranked by string similarity (RapidFuzz) against the field's name and its
+already-configured candidate synonyms, with a confidence score. A key
+with no plausible match is reported as unmapped, never guessed.
+See `app.collectors.field_map_discovery`.
+
+```bash
+sigint discover-fields --sample-limit 5 --score-cutoff 60
+```
+
+### `sigint discover-selectors` -- listing-card/link candidates (KV.ee, Kinnisvara24, City24)
+
+Analyzes a downloaded (or live-fetched) listing/search-results page and
+reports repeated tag+class element groups that look like listing cards,
+anchor groups that look like `listing_link_selector` candidates, and
+price-like/postal-code-like text samples -- each with an occurrence count
+and a sample, for an operator to compare against the real page.
+See `app.collectors.selector_discovery`.
+
+```bash
+sigint discover-selectors --html-file search_results.html
+sigint discover-selectors --url https://www.kv.ee/... --collector kv_ee
+```
+
+### `sigint inspect-xml` -- element structure (Ilmateenistus)
+
+Parses an XML feed (via the same DOCTYPE-rejecting `safe_parse_xml` every
+collector uses) and reports every distinct element path, its occurrence
+count, observed attribute names with a sample value, and sample text
+content. With `--interactive`, walks through the element paths
+`IlmateenistusCollector` currently hardcodes and asks the operator to
+confirm each against what was actually found -- a diagnostic only; it
+never rewrites the collector's parsing code.
+See `app.collectors.xml_schema_inspector`.
+
+```bash
+sigint inspect-xml --xml-file forecast.xml
+sigint inspect-xml --url https://www.ilmateenistus.ee/... --interactive
+```
+
+### `sigint verify-collector` -- enablement wizard
+
+Runs a collector for real (`collector.collect()` never persists anything
+itself -- only `SignalService`/`WeatherEventService` write to storage, so
+this is a safe dry run), inspects what it actually produced, and prints a
+final `READY`/`NOT READY` enablement report with a matching exit code (0
+for READY). For `ehitisregister` this also runs the field-map coverage
+check above; for the browser-based listing collectors and Ilmateenistus
+it checks that the collector is configured before executing it.
+`ehitisregister_xtee` always reports `BLOCKED` immediately, with no
+discovery attempted -- see the X-tee section above for why.
+
+```bash
+sigint verify-collector ehitisregister
+sigint verify-collector kv_ee
+sigint verify-collector ehitisregister_xtee   # always BLOCKED by design
+```
+
+### `sigint health` -- collector run history
+
+Reads the audit log for the last known status, duration, item count, and
+consecutive-failure streak of every collector that has run at least once
+(`app.application.services.collector_health_service.CollectorHealthService`).
+Purely a summary of history `collect`/`pipeline` already recorded --
+running it triggers no collection.
+
+```bash
+sigint health
+```
+
+### `sigint purge` -- safe deletion by source
+
+Deletes Signals or WeatherEvents from a given `source`, optionally only
+those older than `--before`, via
+`app.application.services.data_management_service.DataManagementService`.
+Always a dry-run preview by default; pass `--yes` to actually delete, and
+every real deletion is audit logged (`DATA_PURGED`). Deliberately scoped
+to Signals and WeatherEvents, not Leads -- a Lead can be generated from
+signals across several sources, so it has no single `source` to purge by.
+
+```bash
+sigint purge signals --source "Ehitisregister (Estonian Building Registry)"        # preview
+sigint purge signals --source "Ehitisregister (Estonian Building Registry)" --yes  # delete
+sigint purge weather-events --source "Ilmateenistus (Estonian Environment Agency Weather Service)" --before 2026-01-01 --yes
+```

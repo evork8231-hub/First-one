@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.interfaces.repositories import SignalRepository
 from app.core.exceptions import EntityNotFoundError
+from app.database.column_types import to_storage_utc
 from app.database.models.signal_model import SignalModel
 from app.database.session import session_scope
 from app.domain.enums import ServiceCategory, VerificationStatus
@@ -104,3 +106,16 @@ class SQLiteSignalRepository(SignalRepository):
             if municipality is not None:
                 stmt = stmt.where(SignalModel.municipality == municipality)
             return session.scalar(stmt) or 0
+
+    def delete_by_source(
+        self, source: str, *, before: datetime | None = None, dry_run: bool = False
+    ) -> int:
+        with session_scope(self._session_factory) as session:
+            filters = [SignalModel.source == source]
+            if before is not None:
+                filters.append(SignalModel.timestamp < to_storage_utc(before))
+            count_stmt = select(func.count()).select_from(SignalModel).where(*filters)
+            matching = session.scalar(count_stmt) or 0
+            if not dry_run and matching:
+                session.execute(delete(SignalModel).where(*filters))
+            return matching

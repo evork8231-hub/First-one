@@ -108,7 +108,7 @@ Correlation -> Lead Generation -> Lead Verification -> Lead Scoring -> Export
 | Model | Purpose |
 |---|---|
 | `Signal` | A single verifiable public fact. Never a lead. |
-| `WeatherEvent` | A severe weather occurrence, stored independently. **Not currently bridged into a `SignalType.WEATHER_EVENT` Signal** -- see "still explicitly out of scope" below; a `weather_event` rule condition cannot be satisfied by real data yet. |
+| `WeatherEvent` | A severe weather occurrence, stored independently. Also bridged into a `SignalType.WEATHER_EVENT` Signal by `WeatherSignalBridgeService` (timestamped at collection time, not the forecast period, to satisfy `Signal`'s future-timestamp rejection) so a `weather_event` rule condition can be satisfied by real data -- weather still never independently produces a Lead; see `MIN_SUPPORTING_SIGNALS`/`LeadGenerator` below. |
 | `Rule` / `SignalCondition` | A data-driven definition of which signal types (and how many, how recent, how confident) justify a Lead. |
 | `Lead` | A generated opportunity, always citing >= 2 supporting Signal IDs and a human-readable `reasoning` string. |
 | `AuditLogEntry` | An immutable record of a noteworthy pipeline event (collector run, verification decision, lead generated, etc.). |
@@ -217,17 +217,25 @@ Enforced in code, not just policy:
 
 ## What's still explicitly out of scope
 
-- **Known limitation, flagged by production-readiness audit:** collected
-  `WeatherEvent`s are not yet bridged into a `SignalType.WEATHER_EVENT`
-  `Signal`. `sigint collect --all`/`pipeline` do run any enabled weather
-  collector and persist its `WeatherEvent`s, but nothing today converts
-  one into a `Signal`, so `config/rules/roofing.yaml`'s
+- **Resolved, previously flagged by production-readiness audit:** collected
+  `WeatherEvent`s are now bridged into `SignalType.WEATHER_EVENT` Signals
+  by `app.application.services.weather_signal_bridge_service.WeatherSignalBridgeService`,
+  invoked from `sigint collect --all`/`pipeline` right after each enabled
+  weather collector's ingestion. `config/rules/roofing.yaml`'s
   `roofing_storm_damage` rule (which requires a `weather_event`-typed
-  signal alongside a building record and a roof mention) cannot currently
-  match real data. Building the bridge requires a deliberate decision on
-  what `service_category`, `confidence`, and verification policy a
-  weather-derived Signal should carry -- a product decision for a
-  reviewed follow-up, not something to decide silently in a bug fix.
+  signal alongside a building record and a roof mention) can now match
+  real data. `service_category`/`confidence` for the bridged Signal come
+  from the explicit, documented `weather_signal_bridge` config block
+  (default `roofing`/`0.8`), not from inference on the event's content --
+  see `docs/CONFIGURATION.md`.
+- The Ehitisregister X-tee adapter
+  (`app.collectors.ehitisregister_xtee_collector.EhitisregisterXTeeCollector`)
+  remains intentionally disabled: X-tee is a real, documented access path
+  but requires a registered member agreement, a security server, and
+  certificates this platform cannot provision, and the operation-specific
+  request/response schema was never verified against a real service.
+  `sigint verify-collector ehitisregister_xtee` always reports `BLOCKED`.
+  See `docs/COLLECTORS.md`.
 - No verifier cross-references a real external registry beyond a
   collector's own declared source (that would require a second, separate
   data source per verifier -- a deliberate future phase, not fabricated now).

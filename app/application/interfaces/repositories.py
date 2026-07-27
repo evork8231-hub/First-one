@@ -73,6 +73,19 @@ class SignalRepository(ABC):
     ) -> int:
         """Return how many signals match the given filters, without loading them."""
 
+    @abstractmethod
+    def delete_by_source(
+        self, source: str, *, before: datetime | None = None, dry_run: bool = False
+    ) -> int:
+        """Delete every signal whose ``source`` matches, optionally only those older than
+        ``before`` (compared against ``Signal.timestamp``).
+
+        When ``dry_run`` is ``True``, nothing is deleted; the method only
+        returns how many signals *would* be deleted, so a caller (e.g. an
+        operator-facing CLI purge command) can preview the effect before
+        confirming a real, destructive run.
+        """
+
 
 class LeadRepository(ABC):
     """Persistence boundary for Lead entities."""
@@ -143,6 +156,18 @@ class WeatherEventRepository(ABC):
     @abstractmethod
     def count(self) -> int:
         """Return how many weather events are currently stored."""
+
+    @abstractmethod
+    def delete_by_source(
+        self, source: str, *, before: datetime | None = None, dry_run: bool = False
+    ) -> int:
+        """Delete every weather event whose ``source`` matches, optionally only those
+        older than ``before`` (compared against ``WeatherEvent.started_at``).
+
+        When ``dry_run`` is ``True``, nothing is deleted; the method only
+        returns how many events *would* be deleted -- see
+        ``SignalRepository.delete_by_source`` for the same contract.
+        """
 
 
 class AuditLogRepository(ABC):

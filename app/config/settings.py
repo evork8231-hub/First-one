@@ -19,6 +19,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.constants import PRIMARY_COUNTRY_CODE
 from app.core.retry import RetryPolicy
+from app.domain.enums import ServiceCategory
 
 
 class DatabaseConfig(BaseModel):
@@ -463,6 +464,36 @@ class ScoringConfig(BaseModel):
         return value
 
 
+class WeatherSignalBridgeConfig(BaseModel):
+    """Settings for bridging a collected WeatherEvent into a WEATHER_EVENT Signal.
+
+    Per the mission rule, weather never independently justifies a Lead --
+    the rule engine's ``min_matching_conditions``/``MIN_SUPPORTING_SIGNALS``
+    and ``LeadGenerator`` already exclude weather signals from a Lead's
+    supporting evidence (see ``app.lead_generation.generator``). This
+    config only controls the two fields a bridged Signal needs that a
+    WeatherEvent has no equivalent of -- neither is inferred from the
+    event's own content:
+
+    - ``service_category``: a WeatherEvent isn't service-specific. The
+      rule engine matches on ``signal_type`` alone (never
+      ``service_category`` -- see ``app.rule_engine.matcher``), so this
+      value is descriptive metadata only. ``ROOFING`` is the default
+      because it is the one category every residential building is
+      universally relevant to, mirroring the identical, already-shipped
+      precedent in ``EhitisregisterCollector`` (a ``BUILDING_RECORD``
+      signal is tagged ``ROOFING`` for the same documented reason).
+    - ``signal_confidence``: WeatherEvent has no confidence field (only
+      ``severity``, a different concept -- how severe the event is, not
+      how reliable the report is). This is a disclosed collector-trust
+      default, the same role ``default_confidence`` plays on every other
+      collector's config.
+    """
+
+    service_category: ServiceCategory = Field(default=ServiceCategory.ROOFING)
+    signal_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
 class ExcelExportConfig(BaseModel):
     """Formatting options for the ``.xlsx`` export, all operator-adjustable."""
 
@@ -514,4 +545,7 @@ class AppSettings(BaseSettings):
     collectors: CollectorsConfig = Field(default_factory=CollectorsConfig)
     rules: RulesConfig = Field(default_factory=RulesConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    weather_signal_bridge: WeatherSignalBridgeConfig = Field(
+        default_factory=WeatherSignalBridgeConfig
+    )
     export: ExportConfig = Field(default_factory=ExportConfig)

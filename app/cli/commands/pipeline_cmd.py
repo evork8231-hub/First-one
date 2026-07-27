@@ -135,6 +135,7 @@ def _run_collect_stage(container: Container, settings: AppSettings, progress: Pr
 
     task = progress.add_task("Collecting signals...", total=None)
     if collectors:
+        drift_detector = container.schema_drift_detector()
         signal_service = container.signal_service()
         results = asyncio.run(
             signal_service.ingest_from_collectors(
@@ -149,16 +150,37 @@ def _run_collect_stage(container: Container, settings: AppSettings, progress: Pr
             total,
             len(failed),
         )
+        for result in results:
+            if not result.succeeded:
+                continue
+            drift = drift_detector.check(
+                result.collector_name, [signal.raw_payload for signal in result.signals]
+            )
+            if drift.has_drift:
+                logger.warning(
+                    "Pipeline collect stage: schema drift detected for collector {}: "
+                    "{} key(s) added, {} key(s) removed since the last run.",
+                    result.collector_name,
+                    len(drift.added_keys),
+                    len(drift.removed_keys),
+                )
 
     if weather_collectors:
+        # Not schema-drift-checked: WeatherEvent.raw_payload is a fixed-key dict
+        # IlmateenistusCollector itself constructs, not the source feed's own
+        # structure -- see _run_weather_collectors in collect_cmd.py for why.
         weather_service = container.weather_event_service()
+        bridge = container.weather_signal_bridge_service()
         for weather_collector in weather_collectors:
             try:
                 events = asyncio.run(weather_service.ingest_from_collector(weather_collector))
+                bridged = bridge.bridge(events)
                 logger.info(
-                    "Pipeline collect stage: weather collector {} ingested {} event(s).",
+                    "Pipeline collect stage: weather collector {} ingested {} event(s), "
+                    "bridged into {} signal(s).",
                     weather_collector.name,
                     len(events),
+                    len(bridged),
                 )
             except CollectorError as exc:
                 logger.error(

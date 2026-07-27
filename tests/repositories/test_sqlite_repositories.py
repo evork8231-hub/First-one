@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from app.core.exceptions import EntityNotFoundError
 from app.domain.audit import AuditLogEntry
@@ -12,6 +14,7 @@ from app.repositories.sqlite.configuration_repository import SQLiteConfiguration
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
 from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
 from app.repositories.sqlite.weather_repository import SQLiteWeatherEventRepository
+from app.utils.time import utc_now
 
 from tests.fixtures.factories import make_lead, make_signal, make_weather_event
 
@@ -61,6 +64,43 @@ def test_signal_repository_add_many_and_count(sqlite_session_factory) -> None:
     assert repo.add_many([]) == []
 
 
+def test_signal_repository_delete_by_source_dry_run_and_real(sqlite_session_factory) -> None:
+    repo = SQLiteSignalRepository(sqlite_session_factory)
+    repo.add(make_signal(source="ehitisregister"))
+    repo.add(make_signal(source="ehitisregister"))
+    kept = repo.add(make_signal(source="ilmateenistus"))
+
+    previewed = repo.delete_by_source("ehitisregister", dry_run=True)
+    assert previewed == 2
+    assert repo.count() == 3
+
+    deleted = repo.delete_by_source("ehitisregister")
+    assert deleted == 2
+    assert repo.count() == 1
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_signal_repository_delete_by_source_respects_before(sqlite_session_factory) -> None:
+    repo = SQLiteSignalRepository(sqlite_session_factory)
+    now = utc_now()
+    old = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(days=10)))
+    recent = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(minutes=1)))
+
+    deleted = repo.delete_by_source("ehitisregister", before=now - timedelta(days=1))
+
+    assert deleted == 1
+    assert repo.get_by_id(old.id) is None
+    assert repo.get_by_id(recent.id) is not None
+
+
+def test_signal_repository_delete_by_source_no_match_returns_zero(sqlite_session_factory) -> None:
+    repo = SQLiteSignalRepository(sqlite_session_factory)
+    repo.add(make_signal(source="ehitisregister"))
+
+    assert repo.delete_by_source("does_not_exist") == 0
+    assert repo.count() == 1
+
+
 def test_lead_repository_crud_roundtrip(sqlite_session_factory) -> None:
     repo = SQLiteLeadRepository(sqlite_session_factory)
     lead = repo.add(make_lead())
@@ -99,6 +139,44 @@ def test_weather_repository_add_many_and_count(sqlite_session_factory) -> None:
     assert len(stored) == 2
     assert repo.count() == 2
     assert repo.add_many([]) == []
+
+
+def test_weather_repository_delete_by_source_dry_run_and_real(sqlite_session_factory) -> None:
+    repo = SQLiteWeatherEventRepository(sqlite_session_factory)
+    repo.add(make_weather_event(source="ilmateenistus"))
+    kept = repo.add(make_weather_event(source="other_source"))
+
+    previewed = repo.delete_by_source("ilmateenistus", dry_run=True)
+    assert previewed == 1
+    assert repo.count() == 2
+
+    deleted = repo.delete_by_source("ilmateenistus")
+    assert deleted == 1
+    assert repo.count() == 1
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_weather_repository_delete_by_source_respects_before(sqlite_session_factory) -> None:
+    repo = SQLiteWeatherEventRepository(sqlite_session_factory)
+    now = utc_now()
+    old = repo.add(
+        make_weather_event(
+            source="ilmateenistus",
+            started_at=now - timedelta(days=10),
+            ended_at=now - timedelta(days=10) + timedelta(hours=3),
+        )
+    )
+    recent = repo.add(
+        make_weather_event(
+            source="ilmateenistus", started_at=now - timedelta(minutes=1), ended_at=now
+        )
+    )
+
+    deleted = repo.delete_by_source("ilmateenistus", before=now - timedelta(days=1))
+
+    assert deleted == 1
+    assert repo.get_by_id(old.id) is None
+    assert repo.get_by_id(recent.id) is not None
 
 
 def test_audit_log_repository_roundtrip(sqlite_session_factory) -> None:

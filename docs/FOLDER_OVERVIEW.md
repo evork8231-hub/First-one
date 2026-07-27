@@ -11,15 +11,21 @@ app/
     interfaces/           Abstract repository/collector/verifier/correlation/rule_engine/lead_generation contracts.
     services/             Use-case orchestration: SignalService (incl. concurrent multi-collector ingestion),
                            VerificationService, CorrelationService, LeadGenerationService, ExportService,
-                           WeatherEventService.
+                           WeatherEventService, WeatherSignalBridgeService (turns a collected WeatherEvent
+                           into a real WEATHER_EVENT Signal so it reaches correlation/scoring),
+                           DataManagementService (source-scoped, dry-run-by-default purge of Signals/
+                           WeatherEvents), CollectorHealthService (read-only run history from the audit log).
   collectors/             CollectorInterface scaffolding (BaseCollector, CollectorRegistry) plus five shipped,
                            config-gated collectors: ehitisregister_collector.py, ilmateenistus_collector.py,
                            real_estate/{kv_ee,kinnisvara24,city24}_collector.py. Shared: http_client.py (retry,
                            rate limiting, optional response caching), browser_client.py, jsonld.py, xml_utils.py,
-                           phrase_matching.py, rate_limiting.py. See docs/COLLECTORS.md.
+                           phrase_matching.py, rate_limiting.py. Operator discovery tools (advisory only, never
+                           write config): field_map_discovery.py, selector_discovery.py, xml_schema_inspector.py.
+                           See docs/COLLECTORS.md.
   verification/           StructuralSignalVerifier (structural/consistency checks incl. coordinate bounds),
                            StructuralLeadVerifier, DuplicateDetector + DuplicateSignalVerifier (duplicate
-                           detection), geo.py (haversine distance).
+                           detection), geo.py (haversine distance), schema_drift.py (SchemaDriftDetector --
+                           warns, never blocks, when a collector's source structure changes between runs).
   correlation/             CorrelationEngine -- groups verified Signals into SignalClusters.
   rule_engine/             RuleEngine (evaluation), matcher.py (per-condition matching), loader.py (YAML -> Rule,
                            with an in-process cache -- see docs/DEVELOPMENT.md#caching).
@@ -40,8 +46,12 @@ app/
     main.py                 Typer app + DI container wiring.
     commands/                One module per subcommand: init, collect (single or --all, concurrent),
                            verify (signals/lead), correlate, generate, score, export, pipeline (full
-                           end-to-end run), stats, config. Every command uses Rich progress bars and
-                           structured logging; see docs/DEVELOPMENT.md#adding-a-new-cli-command.
+                           end-to-end run), stats, config, health (per-collector run history), purge
+                           (dry-run-by-default deletion by source), discover-fields, discover-selectors,
+                           inspect-xml (advisory discovery tools -- never write config), verify-collector
+                           (executes a collector for real, no persistence, and prints a READY/NOT READY
+                           enablement report). Every command uses Rich progress bars and structured
+                           logging; see docs/DEVELOPMENT.md#adding-a-new-cli-command.
   utils/                   ids.py (new_id), time.py (utc_now) -- the only place default IDs/clocks are generated.
 
 config/

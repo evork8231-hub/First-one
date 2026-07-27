@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
 from app.application.interfaces.repositories import SignalRepository
@@ -81,3 +82,16 @@ class InMemorySignalRepository(SignalRepository):
         if municipality is not None:
             results = [s for s in results if s.municipality == municipality]
         return len(results)
+
+    def delete_by_source(
+        self, source: str, *, before: datetime | None = None, dry_run: bool = False
+    ) -> int:
+        matching_ids = [
+            sid
+            for sid, signal in self._signals.items()
+            if signal.source == source and (before is None or signal.timestamp < before)
+        ]
+        if not dry_run:
+            for sid in matching_ids:
+                del self._signals[sid]
+        return len(matching_ids)

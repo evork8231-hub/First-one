@@ -163,3 +163,29 @@ def test_collector_identity() -> None:
     assert collector.name == "ehitisregister"
     assert SignalType.BUILDING_RECORD in collector.supported_signal_types
     assert SignalType.ENERGY_CERTIFICATE in collector.supported_signal_types
+
+
+def test_sample_raw_records_returns_unmodified_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    records = [{**_VALID_RECORD, "ehitisregistri_kood": str(i)} for i in range(3)]
+    transport = _dataset_handler(records)
+    _patch_http_client(monkeypatch, transport)
+    collector = EhitisregisterCollector(EhitisregisterConfig())
+
+    sampled = asyncio.run(collector.sample_raw_records(limit=2))
+
+    assert len(sampled) == 2
+    assert sampled[0] == records[0]
+    assert sampled == records[:2]  # raw, un-extracted records -- no Signal conversion applied
+
+
+def test_sample_raw_records_does_not_skip_records_missing_required_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unlike collect(), sampling is for inspection -- it must not silently drop anything."""
+    transport = _dataset_handler([_RECORD_MISSING_COUNTY])
+    _patch_http_client(monkeypatch, transport)
+    collector = EhitisregisterCollector(EhitisregisterConfig())
+
+    sampled = asyncio.run(collector.sample_raw_records())
+
+    assert sampled == [_RECORD_MISSING_COUNTY]

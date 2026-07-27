@@ -20,9 +20,12 @@ There is also a fourth, database-backed surface --
 `app.domain.configuration.ConfigurationEntry`, persisted in the
 `configuration` table via `ConfigurationRepository` -- intended for
 values an operator adjusts at runtime (e.g. temporarily disabling a rule)
-without a redeploy. The foundation defines the repository and table; no
-service yet reads from it to override `AppSettings` at runtime (a future
-phase's job).
+without a redeploy. No service yet reads from it to override
+`AppSettings` at runtime (a future phase's job); its one current consumer
+is `app.verification.schema_drift.SchemaDriftDetector`, which stores a
+per-collector key-set fingerprint under `schema_fingerprint.<collector_name>`
+(see [`COLLECTORS.md#schema-drift-detection`](COLLECTORS.md#schema-drift-detection)).
+These entries are auto-maintained -- do not edit them by hand.
 
 ## `config/default.yaml` reference
 
@@ -58,6 +61,8 @@ phase's job).
 | `scoring.confidence_aggregation` | `mean` or `min`, how signal confidences combine into a lead's `estimated_confidence` | `mean` |
 | `scoring.weather_confidence_boost_factor` | How much a matched weather signal scales confidence/intent (never counts as supporting evidence) | `0.2` |
 | `scoring.priority_thresholds` | Minimum `intent_score` per `LeadPriority` | `critical: 0.85, high: 0.65, medium: 0.4, low: 0.0` |
+| `weather_signal_bridge.service_category` | `service_category` given to every WEATHER_EVENT Signal bridged from a collected WeatherEvent | `roofing` |
+| `weather_signal_bridge.signal_confidence` | `confidence` given to every bridged WEATHER_EVENT Signal | `0.8` |
 | `export.default_format` | `json`, `csv`, or `xlsx` | `json` |
 | `export.output_directory` | Default directory for `sigint export --output` | `exports` |
 | `export.excel.*` | Header colors, frozen header, autofilter, column width bounds, date format for `.xlsx` export | see `config/default.yaml` |

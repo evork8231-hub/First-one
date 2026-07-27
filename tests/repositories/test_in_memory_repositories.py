@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from app.core.exceptions import EntityNotFoundError
 from app.domain.configuration import ConfigurationEntry
@@ -11,6 +13,7 @@ from app.repositories.in_memory.configuration_repository import InMemoryConfigur
 from app.repositories.in_memory.lead_repository import InMemoryLeadRepository
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
 from app.repositories.in_memory.weather_repository import InMemoryWeatherEventRepository
+from app.utils.time import utc_now
 
 from tests.fixtures.factories import make_lead, make_signal, make_weather_event
 
@@ -71,6 +74,52 @@ def test_signal_repository_count_respects_filters() -> None:
     assert repo.count(county="Saare") == 0
 
 
+def test_signal_repository_delete_by_source_dry_run_deletes_nothing() -> None:
+    repo = InMemorySignalRepository()
+    repo.add(make_signal(source="ehitisregister"))
+    repo.add(make_signal(source="ehitisregister"))
+    repo.add(make_signal(source="ilmateenistus"))
+
+    previewed = repo.delete_by_source("ehitisregister", dry_run=True)
+
+    assert previewed == 2
+    assert repo.count() == 3
+
+
+def test_signal_repository_delete_by_source_deletes_only_matching_source() -> None:
+    repo = InMemorySignalRepository()
+    repo.add(make_signal(source="ehitisregister"))
+    repo.add(make_signal(source="ehitisregister"))
+    kept = repo.add(make_signal(source="ilmateenistus"))
+
+    deleted = repo.delete_by_source("ehitisregister")
+
+    assert deleted == 2
+    assert repo.count() == 1
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_signal_repository_delete_by_source_respects_before() -> None:
+    repo = InMemorySignalRepository()
+    now = utc_now()
+    old = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(days=10)))
+    recent = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(minutes=1)))
+
+    deleted = repo.delete_by_source("ehitisregister", before=now - timedelta(days=1))
+
+    assert deleted == 1
+    assert repo.get_by_id(old.id) is None
+    assert repo.get_by_id(recent.id) is not None
+
+
+def test_signal_repository_delete_by_source_no_match_returns_zero() -> None:
+    repo = InMemorySignalRepository()
+    repo.add(make_signal(source="ehitisregister"))
+
+    assert repo.delete_by_source("does_not_exist") == 0
+    assert repo.count() == 1
+
+
 def test_lead_repository_crud_roundtrip() -> None:
     repo = InMemoryLeadRepository()
     lead = repo.add(make_lead())
@@ -116,6 +165,46 @@ def test_weather_repository_list_by_region_and_time() -> None:
         repo.list_by_region_and_time(county="Tartu", since=event.started_at, until=event.ended_at)
         == []
     )
+
+
+def test_weather_repository_delete_by_source_dry_run_and_real() -> None:
+    repo = InMemoryWeatherEventRepository()
+    repo.add(make_weather_event(source="ilmateenistus"))
+    kept = repo.add(make_weather_event(source="other_source"))
+
+    previewed = repo.delete_by_source("ilmateenistus", dry_run=True)
+    assert previewed == 1
+    assert repo.count() == 2
+
+    deleted = repo.delete_by_source("ilmateenistus")
+    assert deleted == 1
+    assert repo.count() == 1
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_weather_repository_delete_by_source_respects_before() -> None:
+    repo = InMemoryWeatherEventRepository()
+    now = utc_now()
+    old = repo.add(
+        make_weather_event(
+            source="ilmateenistus",
+            started_at=now - timedelta(days=10),
+            ended_at=now - timedelta(days=10) + timedelta(hours=3),
+        )
+    )
+    recent = repo.add(
+        make_weather_event(
+            source="ilmateenistus",
+            started_at=now - timedelta(minutes=1),
+            ended_at=now,
+        )
+    )
+
+    deleted = repo.delete_by_source("ilmateenistus", before=now - timedelta(days=1))
+
+    assert deleted == 1
+    assert repo.get_by_id(old.id) is None
+    assert repo.get_by_id(recent.id) is not None
 
 
 def test_audit_log_repository_add_and_list() -> None:

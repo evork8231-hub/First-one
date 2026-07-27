@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from app.application.services.data_management_service import DataManagementService
 from app.application.services.signal_service import SignalService
 from app.core.container import Container
 from app.correlation.engine import CorrelationEngine
@@ -12,6 +13,7 @@ from app.lead_generation.generator import LeadGenerator
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
 from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
 from app.rule_engine.engine import RuleEngine
+from app.verification.schema_drift import SchemaDriftDetector
 
 
 @pytest.fixture()
@@ -38,6 +40,16 @@ def test_engines_resolve_to_default_implementations(wired_container: Container) 
 def test_services_are_constructible(wired_container: Container) -> None:
     service = wired_container.signal_service()
     assert isinstance(service, SignalService)
+
+
+def test_data_management_service_is_constructible(wired_container: Container) -> None:
+    service = wired_container.data_management_service()
+    assert isinstance(service, DataManagementService)
+
+
+def test_schema_drift_detector_is_constructible(wired_container: Container) -> None:
+    detector = wired_container.schema_drift_detector()
+    assert isinstance(detector, SchemaDriftDetector)
 
 
 def test_repositories_are_singletons(wired_container: Container) -> None:

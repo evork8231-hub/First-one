@@ -165,6 +165,14 @@ scoring:
     medium: 0.4
     low: 0.0
 
+# Controls the WEATHER_EVENT Signal built from each collected WeatherEvent
+# (see app/application/services/weather_signal_bridge_service.py). Every
+# other field on the bridged signal is a direct pass-through of the real
+# WeatherEvent -- these two have no WeatherEvent equivalent to copy from.
+weather_signal_bridge:
+  service_category: roofing
+  signal_confidence: 0.8
+
 export:
   default_format: json
   output_directory: "exports"

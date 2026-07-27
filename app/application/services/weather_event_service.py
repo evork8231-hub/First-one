@@ -9,6 +9,8 @@ reported, with a full audit trail.
 
 from __future__ import annotations
 
+import time
+
 from loguru import logger
 
 from app.application.interfaces.repositories import AuditLogRepository, WeatherEventRepository
@@ -50,28 +52,39 @@ class WeatherEventService:
                 context={"collector": collector.name, "source": collector.source},
             )
         )
+        start = time.monotonic()
         try:
             events = await collector.collect()
         except CollectorError as exc:
+            duration_seconds = round(time.monotonic() - start, 3)
             logger.opt(exception=exc).error("Weather collector {} failed", collector.name)
             self._audit_log_repository.add(
                 AuditLogEntry(
                     event_type=AuditEventType.COLLECTOR_RUN_FAILED,
                     entity_type="WeatherCollector",
                     message=f"Weather collector {collector.name!r} failed: {exc.message}",
-                    context={"collector": collector.name, **exc.details},
+                    context={
+                        "collector": collector.name,
+                        "duration_seconds": duration_seconds,
+                        **exc.details,
+                    },
                 )
             )
             raise
 
         stored = self._weather_event_repository.add_many(events)
+        duration_seconds = round(time.monotonic() - start, 3)
 
         self._audit_log_repository.add(
             AuditLogEntry(
                 event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
                 entity_type="WeatherCollector",
                 message=f"Weather collector {collector.name!r} produced {len(stored)} event(s).",
-                context={"collector": collector.name, "event_count": len(stored)},
+                context={
+                    "collector": collector.name,
+                    "event_count": len(stored),
+                    "duration_seconds": duration_seconds,
+                },
             )
         )
         return stored

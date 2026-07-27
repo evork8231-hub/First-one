@@ -100,4 +100,6 @@ class AuditEventType(StrEnum):
     LEAD_VERIFIED = "lead_verified"
     LEAD_REJECTED = "lead_rejected"
     CONFIGURATION_CHANGED = "configuration_changed"
+    DATA_PURGED = "data_purged"
+    SCHEMA_DRIFT_DETECTED = "schema_drift_detected"
     ERROR = "error"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -59,21 +60,28 @@ class SignalService:
                 context={"collector": collector.name, "source": collector.source},
             )
         )
+        start = time.monotonic()
         try:
             signals = await collector.collect()
         except CollectorError as exc:
+            duration_seconds = round(time.monotonic() - start, 3)
             logger.opt(exception=exc).error("Collector {} failed", collector.name)
             self._audit_log_repository.add(
                 AuditLogEntry(
                     event_type=AuditEventType.COLLECTOR_RUN_FAILED,
                     entity_type="Collector",
                     message=f"Collector {collector.name!r} failed: {exc.message}",
-                    context={"collector": collector.name, **exc.details},
+                    context={
+                        "collector": collector.name,
+                        "duration_seconds": duration_seconds,
+                        **exc.details,
+                    },
                 )
             )
             raise
 
         stored = self._signal_repository.add_many(signals)
+        duration_seconds = round(time.monotonic() - start, 3)
         for stored_signal in stored:
             self._audit_log_repository.add(
                 AuditLogEntry(
@@ -93,7 +101,11 @@ class SignalService:
                 event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
                 entity_type="Collector",
                 message=f"Collector {collector.name!r} produced {len(stored)} signal(s).",
-                context={"collector": collector.name, "signal_count": len(stored)},
+                context={
+                    "collector": collector.name,
+                    "signal_count": len(stored),
+                    "duration_seconds": duration_seconds,
+                },
             )
         )
         return stored

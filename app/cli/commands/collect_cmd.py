@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import Annotated
 
 import typer
@@ -14,6 +15,7 @@ from app.application.interfaces.weather_collector import WeatherCollectorInterfa
 from app.application.services.signal_service import CollectorRunResult
 from app.core.container import Container
 from app.core.exceptions import CollectorError, ConfigurationError
+from app.domain.signal import Signal
 
 console = Console()
 
@@ -75,9 +77,25 @@ def _collect_one(container: Container, collector_name: str) -> None:
             console.print(f"[red]Collector {collector_name!r} failed: {exc.message}[/red]")
             raise typer.Exit(code=1) from exc
 
+    _warn_on_schema_drift(container, collector_name, signals)
     console.print(
         f"[bold green]Ingested {len(signals)} signal(s) from {collector_name!r}.[/bold green]"
     )
+
+
+def _warn_on_schema_drift(
+    container: Container, collector_name: str, signals: Sequence[Signal]
+) -> None:
+    """Non-blocking: report (but never fail on) a collector's source structure changing."""
+    drift = container.schema_drift_detector().check(
+        collector_name, [signal.raw_payload for signal in signals]
+    )
+    if drift.has_drift:
+        console.print(
+            f"[yellow]Schema drift detected for {collector_name!r}: "
+            f"{len(drift.added_keys)} key(s) added, {len(drift.removed_keys)} key(s) removed "
+            f"since the last run. See the audit log for details.[/yellow]"
+        )
 
 
 def _collect_all(container: Container) -> None:
@@ -120,6 +138,9 @@ def _collect_all(container: Container) -> None:
     failed = [r for r in results if not r.succeeded]
     total_signals = sum(len(r.signals) for r in succeeded)
 
+    for result in succeeded:
+        _warn_on_schema_drift(container, result.collector_name, result.signals)
+
     console.print(
         f"Ran {len(results)} signal collector(s): [green]{len(succeeded)} succeeded[/green] "
         f"({total_signals} signal(s) ingested), [red]{len(failed)} failed[/red]."
@@ -152,14 +173,35 @@ def _run_weather_collectors(
     collectors are typically few (one, today) -- see
     ``app.application.services.weather_event_service.WeatherEventService``
     for the underlying, already-tested ingestion logic this only calls.
+
+    Every successfully-ingested batch of WeatherEvents is immediately
+    bridged into WEATHER_EVENT Signals (see
+    ``app.application.services.weather_signal_bridge_service.WeatherSignalBridgeService``)
+    so the events can actually reach correlation and scoring -- without
+    this, collected weather data would never influence a Lead.
+
+    Deliberately not schema-drift-checked (see ``_warn_on_schema_drift``,
+    used for the JSON-based signal collectors above): ``WeatherEvent.raw_payload``
+    is a fixed-key dict IlmateenistusCollector itself constructs from parsed
+    fields, not the source feed's own structure, so its key set never
+    changes regardless of what the real XML looks like -- checking it would
+    report false confidence rather than real drift.
     """
     service = container.weather_event_service()
+    bridge = container.weather_signal_bridge_service()
     event_counts: dict[str, int] = {}
     errors: dict[str, str] = {}
     for weather_collector in weather_collectors:
         try:
             events = asyncio.run(service.ingest_from_collector(weather_collector))
+            bridged = bridge.bridge(events)
             event_counts[weather_collector.name] = len(events)
+            logger.info(
+                "Bridged {} weather event(s) from {} into {} signal(s).",
+                len(events),
+                weather_collector.name,
+                len(bridged),
+            )
         except CollectorError as exc:
             logger.error("Weather collector {} failed: {}", weather_collector.name, exc.message)
             errors[weather_collector.name] = exc.message

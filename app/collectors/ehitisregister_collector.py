@@ -102,6 +102,21 @@ class EhitisregisterCollector(BaseCollector):
         )
         return signals
 
+    async def sample_raw_records(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        """Fetch and return up to ``limit`` real, unmodified source records.
+
+        For operator-facing inspection tools (e.g. field-map discovery,
+        ``sigint discover-fields``) that need to look at what the source
+        actually returns without running full Signal extraction. Reuses
+        the same resource-discovery and record-extraction logic as
+        :meth:`collect`, so what an operator inspects here is exactly what
+        a real collection run would see.
+        """
+        async with HttpClient(self._config, retry_policy=self._retry_policy) as client:
+            resource_url = await self._discover_resource_url(client)
+            payload = await client.get_json(resource_url)
+        return self._extract_records(payload)[:limit]
+
     async def _discover_resource_url(self, client: HttpClient) -> str:
         """Find a JSON resource URL from the dataset's metadata.
 

@@ -19,7 +19,8 @@ from app.application.services.lead_generation_service import LeadGenerationServi
 from app.application.services.signal_service import SignalService
 from app.application.services.verification_service import VerificationService
 from app.application.services.weather_event_service import WeatherEventService
-from app.config.settings import DuplicateDetectionConfig, ScoringConfig
+from app.application.services.weather_signal_bridge_service import WeatherSignalBridgeService
+from app.config.settings import DuplicateDetectionConfig, ScoringConfig, WeatherSignalBridgeConfig
 from app.correlation.engine import CorrelationEngine
 from app.domain.enums import ServiceCategory, SignalType, VerificationStatus
 from app.domain.rule import Rule
@@ -47,7 +48,7 @@ class _StaticRuleProvider(RuleProvider):
         return self._rules
 
 
-def _build_pipeline() -> dict[str, object]:
+def _build_pipeline(*, rule: Rule | None = None) -> dict[str, object]:
     signal_repo = InMemorySignalRepository()
     lead_repo = InMemoryLeadRepository()
     weather_repo = InMemoryWeatherEventRepository()
@@ -60,13 +61,14 @@ def _build_pipeline() -> dict[str, object]:
     ]
     lead_verifiers = [StructuralLeadVerifier(signal_repo, min_confidence=0.5)]
 
-    rule = make_rule(
-        id="pipeline_test_rule",
-        conditions=[
-            make_condition(signal_type=SignalType.BUILDING_RECORD),
-            make_condition(signal_type=SignalType.ROOF_MENTION),
-        ],
-    )
+    if rule is None:
+        rule = make_rule(
+            id="pipeline_test_rule",
+            conditions=[
+                make_condition(signal_type=SignalType.BUILDING_RECORD),
+                make_condition(signal_type=SignalType.ROOF_MENTION),
+            ],
+        )
 
     return {
         "signal_repo": signal_repo,
@@ -75,6 +77,9 @@ def _build_pipeline() -> dict[str, object]:
         "audit_repo": audit_repo,
         "signal_service": SignalService(signal_repo, audit_repo),
         "weather_event_service": WeatherEventService(weather_repo, audit_repo),
+        "weather_signal_bridge_service": WeatherSignalBridgeService(
+            signal_repo, audit_repo, WeatherSignalBridgeConfig()
+        ),
         "verification_service": VerificationService(
             signal_repo, lead_repo, audit_repo, signal_verifiers, lead_verifiers
         ),
@@ -175,3 +180,75 @@ def test_weather_events_never_become_leads_in_the_full_pipeline() -> None:
     leads = lead_generation_service.generate_from_matches(matches)
 
     assert leads == []  # weather alone can never generate a lead
+
+
+def test_weather_event_bridged_into_a_signal_enables_a_weather_conditioned_rule_to_match() -> None:
+    """The WeatherSignalBridgeService is what closes the gap the previous test exercises:
+
+    once a WeatherEvent is bridged into a real WEATHER_EVENT Signal, a rule that
+    requires weather alongside real evidence can match end-to-end, and the
+    resulting Lead's supporting_signal_ids still excludes the weather signal
+    (weather only boosts confidence, per app.lead_generation.generator.LeadGenerator).
+    """
+    weather_conditioned_rule = make_rule(
+        id="weather_conditioned_pipeline_test_rule",
+        conditions=[
+            make_condition(signal_type=SignalType.WEATHER_EVENT, min_count=1),
+            make_condition(signal_type=SignalType.BUILDING_RECORD),
+            make_condition(signal_type=SignalType.ROOF_MENTION),
+        ],
+    )
+    pipeline = _build_pipeline(rule=weather_conditioned_rule)
+    weather_event_service: WeatherEventService = pipeline["weather_event_service"]  # type: ignore[assignment]
+    bridge_service: WeatherSignalBridgeService = pipeline["weather_signal_bridge_service"]  # type: ignore[assignment]
+    signal_service: SignalService = pipeline["signal_service"]  # type: ignore[assignment]
+    verification_service: VerificationService = pipeline["verification_service"]  # type: ignore[assignment]
+    correlation_service: CorrelationService = pipeline["correlation_service"]  # type: ignore[assignment]
+    lead_generation_service: LeadGenerationService = pipeline["lead_generation_service"]  # type: ignore[assignment]
+
+    # 1. Collect a WeatherEvent, then bridge it into a real WEATHER_EVENT Signal.
+    weather_collector = FakeWeatherCollector([make_weather_event()])
+    events = asyncio.run(weather_event_service.ingest_from_collector(weather_collector))
+    bridged_signals = bridge_service.bridge(events)
+    assert len(bridged_signals) == 1
+    assert bridged_signals[0].signal_type == SignalType.WEATHER_EVENT
+
+    # 2. Collect the other, non-weather evidence a real detection would also have.
+    evidence_collector = FakeCollector(
+        [
+            make_signal(
+                signal_type=SignalType.BUILDING_RECORD,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+            ),
+            make_signal(
+                signal_type=SignalType.ROOF_MENTION,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+            ),
+        ]
+    )
+    asyncio.run(signal_service.ingest_from_collector(evidence_collector))
+
+    # 3. Verify everything (the bridged weather signal included).
+    verified = asyncio.run(verification_service.verify_pending_signals(limit=10))
+    assert len(verified) == 3
+    assert all(s.verified == VerificationStatus.VERIFIED for s in verified)
+
+    # 4. Correlate: the weather-conditioned rule now matches.
+    matches = correlation_service.run()
+    assert len(matches) == 1
+    assert matches[0].rule.id == "weather_conditioned_pipeline_test_rule"
+
+    # 5. Generate: a Lead is produced, and the weather signal boosted its
+    # confidence/intent score without becoming supporting evidence itself.
+    leads = lead_generation_service.generate_from_matches(matches)
+    assert len(leads) == 1
+    lead = leads[0]
+    assert bridged_signals[0].id not in lead.supporting_signal_ids
+    assert len(lead.supporting_signal_ids) == 2
+    assert 0.0 <= lead.estimated_confidence <= 1.0
+    assert 0.0 <= lead.intent_score <= 1.0
+    assert "weather signal" in lead.reasoning

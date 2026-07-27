@@ -130,4 +130,19 @@ There is no HTTP health endpoint (no web server ships). A reasonable
 external check is `sigint config validate` (confirms configuration is
 loadable) followed by `sigint stats` (confirms the database is reachable
 and queryable) -- both exit `0` on success and are cheap enough to run on
-a monitoring interval.
+a monitoring interval. `sigint health` goes one step further and reports
+each collector's last run status, duration, item count, and consecutive-
+failure streak (read from the audit log; triggers no collection itself)
+-- a good addition to an operator dashboard or a scheduled alert on
+`consecutive_failures` crossing a threshold.
+
+## Removing data from a retired or misconfigured source
+
+`sigint purge signals --source <name>` / `sigint purge weather-events
+--source <name>` delete every Signal/WeatherEvent from that source,
+optionally only those older than `--before`. Both default to a dry-run
+preview; pass `--yes` to actually delete, and every real deletion is
+audit logged (`DATA_PURGED`). This replaces manually running `DELETE`
+against the SQLite database, which this project's operator docs
+otherwise never recommend. See
+[`COLLECTORS.md#operator-tooling`](COLLECTORS.md#operator-tooling).

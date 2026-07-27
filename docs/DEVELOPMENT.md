@@ -54,6 +54,14 @@ pytest -k test_name                # run a single test
    feeds into -- add a section there for the new collector, following the
    existing format (uses / required settings / known limitations / what
    it produces).
+8. Before enabling any collector in production, run
+   `sigint verify-collector <name>` (see
+   [`COLLECTORS.md#operator-tooling`](COLLECTORS.md#operator-tooling)) --
+   it executes the collector for real (without persisting anything) and
+   prints a READY/NOT READY report. For a JSON-based collector, pair it
+   with `sigint discover-fields`; for a browser-based listing collector,
+   `sigint discover-selectors`; for an XML feed, `sigint inspect-xml`.
+   These tools only suggest -- they never write configuration for you.
 
 ## Adding a new verifier
 

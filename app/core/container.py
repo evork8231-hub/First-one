@@ -28,12 +28,15 @@ from dependency_injector import containers, providers
 
 from app.application.interfaces.collector import CollectorInterface
 from app.application.interfaces.weather_collector import WeatherCollectorInterface
+from app.application.services.collector_health_service import CollectorHealthService
 from app.application.services.correlation_service import CorrelationService
+from app.application.services.data_management_service import DataManagementService
 from app.application.services.export_service import ExportService
 from app.application.services.lead_generation_service import LeadGenerationService
 from app.application.services.signal_service import SignalService
 from app.application.services.verification_service import VerificationService
 from app.application.services.weather_event_service import WeatherEventService
+from app.application.services.weather_signal_bridge_service import WeatherSignalBridgeService
 from app.collectors.ehitisregister_collector import EhitisregisterCollector
 from app.collectors.ehitisregister_xtee_collector import EhitisregisterXTeeCollector
 from app.collectors.ilmateenistus_collector import IlmateenistusCollector
@@ -57,6 +60,7 @@ from app.rule_engine.engine import RuleEngine
 from app.rule_engine.loader import RuleLoader
 from app.verification.duplicate_detector import DuplicateDetector
 from app.verification.duplicate_signal_verifier import DuplicateSignalVerifier
+from app.verification.schema_drift import SchemaDriftDetector
 from app.verification.structural_lead_verifier import StructuralLeadVerifier
 from app.verification.structural_signal_verifier import StructuralSignalVerifier
 
@@ -163,6 +167,11 @@ class Container(containers.DeclarativeContainer):
     )
     signal_verifiers = providers.List(structural_signal_verifier, duplicate_signal_verifier)
     lead_verifiers = providers.List(structural_lead_verifier)
+    schema_drift_detector = providers.Factory(
+        SchemaDriftDetector,
+        configuration_repository=configuration_repository,
+        audit_log_repository=audit_log_repository,
+    )
 
     # --- Correlation & rules --------------------------------------------------------
     correlation_engine = providers.Singleton(CorrelationEngine)
@@ -212,4 +221,19 @@ class Container(containers.DeclarativeContainer):
         WeatherEventService,
         weather_event_repository=weather_event_repository,
         audit_log_repository=audit_log_repository,
+    )
+    weather_signal_bridge_service = providers.Factory(
+        WeatherSignalBridgeService,
+        signal_repository=signal_repository,
+        audit_log_repository=audit_log_repository,
+        config=settings.provided.weather_signal_bridge,
+    )
+    data_management_service = providers.Factory(
+        DataManagementService,
+        signal_repository=signal_repository,
+        weather_event_repository=weather_event_repository,
+        audit_log_repository=audit_log_repository,
+    )
+    collector_health_service = providers.Factory(
+        CollectorHealthService, audit_log_repository=audit_log_repository
     )
