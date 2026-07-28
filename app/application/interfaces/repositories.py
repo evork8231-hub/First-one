@@ -74,37 +74,29 @@ class SignalRepository(ABC):
         """Return how many signals match the given filters, without loading them."""
 
     @abstractmethod
-    def delete_by_source(
-        self, source: str, *, before: datetime | None = None, dry_run: bool = False
-    ) -> int:
-        """Delete every signal whose ``source`` matches, optionally only those older than
-        ``before`` (compared against ``Signal.timestamp``).
-
-        When ``dry_run`` is ``True``, nothing is deleted; the method only
-        returns how many signals *would* be deleted, so a caller (e.g. an
-        operator-facing CLI purge command) can preview the effect before
-        confirming a real, destructive run.
-        """
-
-    @abstractmethod
     def delete_by_ids(self, signal_ids: Sequence[UUID]) -> int:
         """Delete exactly the signals in ``signal_ids`` and return how many were deleted.
 
-        For rollback of a specific collector run (see
-        ``app.application.services.rollback_service.RollbackService``),
-        whose audit trail already recorded the exact ids it inserted --
-        unlike :meth:`delete_by_source`, this never needs to guess which
-        rows belong to a run.
+        Used by both ``app.application.interfaces.rollback_unit_of_work.RollbackUnitOfWork``
+        (for a specific collector run, whose audit trail already recorded
+        the exact ids it inserted) and
+        ``app.application.interfaces.purge_unit_of_work.PurgeUnitOfWork`` (for an
+        explicit id set resolved via :meth:`list_ids_by_source`) -- neither
+        ever needs to guess which rows to delete from a filter alone.
         """
 
     @abstractmethod
     def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
-        """Return the ids of every signal :meth:`delete_by_source` would delete for these filters.
+        """Return the ids of every signal whose ``source`` matches, optionally only those
+        older than ``before`` (compared against ``Signal.timestamp``).
 
         Used by ``app.application.services.data_management_service.DataManagementService``
         to check, *before* deleting anything, whether any of those exact
-        signals are still cited by a Lead -- see
-        ``LeadRepository.list_referencing_signal_ids``.
+        signals are still cited by a Lead (see
+        ``LeadRepository.list_referencing_signal_ids``), and then to pass
+        the exact same id set to :meth:`delete_by_ids` via
+        ``PurgeUnitOfWork`` -- a purge never deletes by filter directly,
+        only by an id set it has already checked.
         """
 
 
@@ -158,6 +150,21 @@ class LeadRepository(ABC):
         no way to know whether the caller intends to handle that.
         """
 
+    @abstractmethod
+    def find_by_identity(
+        self, lead_type: ServiceCategory, supporting_signal_ids: Sequence[UUID]
+    ) -> Lead | None:
+        """Return the existing Lead whose ``lead_type`` and ``supporting_signal_ids`` set
+        (order-independent) exactly match, or ``None`` if no such Lead exists.
+
+        Used by ``app.application.services.lead_generation_service.LeadGenerationService``
+        to make Lead generation idempotent: a candidate Lead built from the
+        exact same evidence (the same verified Signals) that already
+        produced a Lead is the same real-world opportunity, not a new one --
+        re-running correlation/generation without any new Signals (e.g. a
+        scheduled ``sigint pipeline`` re-run) must not create a duplicate.
+        """
+
 
 class WeatherEventRepository(ABC):
     """Persistence boundary for WeatherEvent entities."""
@@ -190,18 +197,6 @@ class WeatherEventRepository(ABC):
         """Return how many weather events are currently stored."""
 
     @abstractmethod
-    def delete_by_source(
-        self, source: str, *, before: datetime | None = None, dry_run: bool = False
-    ) -> int:
-        """Delete every weather event whose ``source`` matches, optionally only those
-        older than ``before`` (compared against ``WeatherEvent.started_at``).
-
-        When ``dry_run`` is ``True``, nothing is deleted; the method only
-        returns how many events *would* be deleted -- see
-        ``SignalRepository.delete_by_source`` for the same contract.
-        """
-
-    @abstractmethod
     def delete_by_ids(self, event_ids: Sequence[UUID]) -> int:
         """Delete exactly the weather events in ``event_ids`` and return how many were deleted.
 
@@ -210,8 +205,8 @@ class WeatherEventRepository(ABC):
 
     @abstractmethod
     def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
-        """Return the ids of every weather event :meth:`delete_by_source` would delete for
-        these filters.
+        """Return the ids of every weather event whose ``source`` matches, optionally only
+        those older than ``before`` (compared against ``WeatherEvent.started_at``).
 
         See ``SignalRepository.list_ids_by_source`` for the same contract and rationale --
         used by ``app.application.services.data_management_service.DataManagementService``

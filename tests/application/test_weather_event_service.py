@@ -11,9 +11,18 @@ from app.core.exceptions import CollectorError
 from app.domain.enums import AuditEventType
 from app.domain.weather import WeatherEvent
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
+from app.repositories.in_memory.collection_unit_of_work import InMemoryCollectionUnitOfWork
+from app.repositories.in_memory.signal_repository import InMemorySignalRepository
 from app.repositories.in_memory.weather_repository import InMemoryWeatherEventRepository
 
 from tests.fixtures.factories import make_weather_event
+
+
+def _service(
+    weather_repo: InMemoryWeatherEventRepository, audit_repo: InMemoryAuditLogRepository
+) -> WeatherEventService:
+    uow = InMemoryCollectionUnitOfWork(InMemorySignalRepository(), weather_repo, audit_repo)
+    return WeatherEventService(audit_repo, uow)
 
 
 class _FakeWeatherCollector(WeatherCollectorInterface):
@@ -38,7 +47,7 @@ class _FakeWeatherCollector(WeatherCollectorInterface):
 def test_ingest_from_collector_persists_events_and_logs_audit() -> None:
     weather_repo = InMemoryWeatherEventRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = WeatherEventService(weather_repo, audit_repo)
+    service = _service(weather_repo, audit_repo)
     collector = _FakeWeatherCollector([make_weather_event(), make_weather_event()])
 
     stored = asyncio.run(service.ingest_from_collector(collector))
@@ -52,7 +61,7 @@ def test_ingest_from_collector_persists_events_and_logs_audit() -> None:
 def test_ingest_from_collector_failure_is_audit_logged_and_reraised() -> None:
     weather_repo = InMemoryWeatherEventRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = WeatherEventService(weather_repo, audit_repo)
+    service = _service(weather_repo, audit_repo)
     collector = _FakeWeatherCollector(fail=True)
 
     with pytest.raises(CollectorError):
@@ -65,7 +74,7 @@ def test_ingest_from_collector_failure_is_audit_logged_and_reraised() -> None:
 def test_ingest_from_collector_surfaces_retry_attempts() -> None:
     weather_repo = InMemoryWeatherEventRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = WeatherEventService(weather_repo, audit_repo)
+    service = _service(weather_repo, audit_repo)
     collector = _FakeWeatherCollector([make_weather_event()])
     collector.retry_count = 4  # type: ignore[attr-defined]
 
@@ -78,7 +87,7 @@ def test_ingest_from_collector_surfaces_retry_attempts() -> None:
 def test_ingest_from_collector_reports_zero_retries_when_untracked() -> None:
     weather_repo = InMemoryWeatherEventRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = WeatherEventService(weather_repo, audit_repo)
+    service = _service(weather_repo, audit_repo)
     collector = _FakeWeatherCollector([make_weather_event()])
 
     asyncio.run(service.ingest_from_collector(collector))
@@ -90,7 +99,7 @@ def test_ingest_from_collector_reports_zero_retries_when_untracked() -> None:
 def test_ingest_from_collector_records_execution_id_and_inserted_event_ids() -> None:
     weather_repo = InMemoryWeatherEventRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = WeatherEventService(weather_repo, audit_repo)
+    service = _service(weather_repo, audit_repo)
     collector = _FakeWeatherCollector([make_weather_event(), make_weather_event()])
 
     stored = asyncio.run(service.ingest_from_collector(collector))

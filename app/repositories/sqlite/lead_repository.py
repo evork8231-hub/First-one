@@ -103,3 +103,17 @@ class SQLiteLeadRepository(LeadRepository):
                 for model in session.scalars(stmt)
                 if wanted.intersection(model.supporting_signal_ids)
             ]
+
+    def find_by_identity(
+        self, lead_type: ServiceCategory, supporting_signal_ids: Sequence[UUID]
+    ) -> Lead | None:
+        wanted = {str(signal_id) for signal_id in supporting_signal_ids}
+        with session_scope(self._session_factory) as session:
+            # Scoped by lead_type (indexed) at the SQL layer; the exact-set
+            # comparison itself is done in Python for the same reason
+            # list_referencing_signal_ids does -- see that method's comment.
+            stmt = select(LeadModel).where(LeadModel.lead_type == lead_type)
+            for model in session.scalars(stmt):
+                if set(model.supporting_signal_ids) == wanted:
+                    return model.to_domain()
+            return None

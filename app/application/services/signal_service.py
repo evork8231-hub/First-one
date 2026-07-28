@@ -1,4 +1,21 @@
-"""SignalService: runs collectors and persists the Signals they return."""
+"""SignalService: runs collectors and persists the Signals they return.
+
+Persisting a successful run's Signals, their per-signal audit entries,
+and the run's completion audit entry is delegated to
+``CollectionUnitOfWork`` as one atomic write -- mirroring
+``RollbackService``'s use of ``RollbackUnitOfWork`` and
+``WeatherSignalBridgeService``'s use of ``WeatherBridgeUnitOfWork``, this
+service builds *what* to persist (pure, no I/O) and the unit of work
+handles persisting it atomically, so an interrupted collection run can
+never leave Signals committed with no matching
+``COLLECTOR_RUN_COMPLETED`` entry -- which would otherwise make those
+Signals permanently invisible to ``sigint rollback`` (see
+``app.application.services.rollback_service.RollbackService``, which can
+only discover a run through that entry's ``inserted_signal_ids``).
+``COLLECTOR_RUN_STARTED``/``COLLECTOR_RUN_FAILED`` stay outside the
+atomic write -- see
+``app.application.interfaces.collection_unit_of_work`` for why.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +27,10 @@ from uuid import uuid4
 
 from loguru import logger
 
+from app.application.interfaces.collection_unit_of_work import (
+    CollectedSignal,
+    CollectionUnitOfWork,
+)
 from app.application.interfaces.collector import CollectorInterface
 from app.application.interfaces.repositories import AuditLogRepository, SignalRepository
 from app.core.exceptions import CollectorError
@@ -50,10 +71,14 @@ class SignalService:
     """
 
     def __init__(
-        self, signal_repository: SignalRepository, audit_log_repository: AuditLogRepository
+        self,
+        signal_repository: SignalRepository,
+        audit_log_repository: AuditLogRepository,
+        collection_unit_of_work: CollectionUnitOfWork,
     ) -> None:
         self._signal_repository = signal_repository
         self._audit_log_repository = audit_log_repository
+        self._collection_unit_of_work = collection_unit_of_work
 
     async def ingest_from_collector(self, collector: CollectorInterface) -> list[Signal]:
         """Run ``collector`` and persist every Signal it returns.
@@ -92,39 +117,41 @@ class SignalService:
             )
             raise
 
-        stored = self._signal_repository.add_many(signals)
         duration_seconds = round(time.monotonic() - start, 3)
         execution_id = uuid4()
-        for stored_signal in stored:
-            self._audit_log_repository.add(
-                AuditLogEntry(
+        # Signal.id is client-generated (see app.domain.signal.Signal) and therefore already
+        # known for every element of `signals`, before anything is persisted -- so every
+        # audit entry describing this run can be built up front, purely, and handed to the
+        # unit of work alongside the signals themselves for one atomic write.
+        collected = [
+            CollectedSignal(
+                signal=signal,
+                ingested_entry=AuditLogEntry(
                     event_type=AuditEventType.SIGNAL_INGESTED,
                     entity_type="Signal",
-                    entity_id=stored_signal.id,
+                    entity_id=signal.id,
                     message=(
-                        f"Ingested {stored_signal.signal_type.value} signal from "
-                        f"{collector.source!r}."
+                        f"Ingested {signal.signal_type.value} signal from " f"{collector.source!r}."
                     ),
                     context={"collector": collector.name},
-                )
+                ),
             )
-
-        self._audit_log_repository.add(
-            AuditLogEntry(
-                event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
-                entity_type="Collector",
-                message=f"Collector {collector.name!r} produced {len(stored)} signal(s).",
-                context={
-                    "collector": collector.name,
-                    "signal_count": len(stored),
-                    "duration_seconds": duration_seconds,
-                    "retry_attempts": _retry_attempts(collector),
-                    "execution_id": str(execution_id),
-                    "inserted_signal_ids": [str(signal.id) for signal in stored],
-                },
-            )
+            for signal in signals
+        ]
+        completion_entry = AuditLogEntry(
+            event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
+            entity_type="Collector",
+            message=f"Collector {collector.name!r} produced {len(signals)} signal(s).",
+            context={
+                "collector": collector.name,
+                "signal_count": len(signals),
+                "duration_seconds": duration_seconds,
+                "retry_attempts": _retry_attempts(collector),
+                "execution_id": str(execution_id),
+                "inserted_signal_ids": [str(signal.id) for signal in signals],
+            },
         )
-        return stored
+        return self._collection_unit_of_work.record_signal_collection(collected, completion_entry)
 
     async def ingest_from_collectors(
         self, collectors: Sequence[CollectorInterface], *, max_concurrency: int = 3

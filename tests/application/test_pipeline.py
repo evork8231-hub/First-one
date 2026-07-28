@@ -27,6 +27,7 @@ from app.domain.rule import Rule
 from app.lead_generation.generator import LeadGenerator
 from app.lead_generation.scoring import LeadScorer
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
+from app.repositories.in_memory.collection_unit_of_work import InMemoryCollectionUnitOfWork
 from app.repositories.in_memory.configuration_repository import InMemoryConfigurationRepository
 from app.repositories.in_memory.lead_repository import InMemoryLeadRepository
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
@@ -60,6 +61,8 @@ def _build_pipeline(*, rule: Rule | None = None) -> dict[str, object]:
     audit_repo = InMemoryAuditLogRepository()
     config_repo = InMemoryConfigurationRepository()
 
+    collection_uow = InMemoryCollectionUnitOfWork(signal_repo, weather_repo, audit_repo)
+
     dup_config = DuplicateDetectionConfig()
     signal_verifiers = [
         StructuralSignalVerifier(min_confidence=0.5),
@@ -81,8 +84,8 @@ def _build_pipeline(*, rule: Rule | None = None) -> dict[str, object]:
         "lead_repo": lead_repo,
         "weather_repo": weather_repo,
         "audit_repo": audit_repo,
-        "signal_service": SignalService(signal_repo, audit_repo),
-        "weather_event_service": WeatherEventService(weather_repo, audit_repo),
+        "signal_service": SignalService(signal_repo, audit_repo, collection_uow),
+        "weather_event_service": WeatherEventService(audit_repo, collection_uow),
         "weather_signal_bridge_service": WeatherSignalBridgeService(
             WeatherSignalBridgeConfig(),
             WeatherBridgeDeduplicator(config_repo),
@@ -158,6 +161,130 @@ def test_full_pipeline_produces_an_exportable_verified_lead() -> None:
     # 8. Export VERIFIED leads only.
     exported = export_service.export_leads(export_format="csv")
     assert str(verified_lead.id) in exported
+
+
+def test_pipeline_run_twice_with_no_new_signals_produces_exactly_one_lead() -> None:
+    """Production Blocker 1, requirement 1: 'sigint pipeline' run back-to-back with no new
+    Signals collected between runs (e.g. two consecutive hourly cron ticks) must never
+    duplicate the Lead it already generated. Runs correlate+generate -- the exact two stages
+    'sigint pipeline' always executes -- twice against the same real (in-memory) repositories
+    with nothing new in between.
+    """
+    pipeline = _build_pipeline()
+    signal_service: SignalService = pipeline["signal_service"]  # type: ignore[assignment]
+    verification_service: VerificationService = pipeline["verification_service"]  # type: ignore[assignment]
+    correlation_service: CorrelationService = pipeline["correlation_service"]  # type: ignore[assignment]
+    lead_generation_service: LeadGenerationService = pipeline["lead_generation_service"]  # type: ignore[assignment]
+    lead_repo: InMemoryLeadRepository = pipeline["lead_repo"]  # type: ignore[assignment]
+
+    collector = FakeCollector(
+        [
+            make_signal(
+                signal_type=SignalType.BUILDING_RECORD,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+            ),
+            make_signal(
+                signal_type=SignalType.ROOF_MENTION,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+            ),
+        ]
+    )
+    asyncio.run(signal_service.ingest_from_collector(collector))
+    asyncio.run(verification_service.verify_pending_signals(limit=10))
+
+    # "sigint pipeline" run 1.
+    matches_1 = correlation_service.run()
+    leads_1 = lead_generation_service.generate_from_matches(matches_1)
+    assert len(leads_1) == 1
+    assert lead_repo.count() == 1
+
+    # "sigint pipeline" run 2 -- no new signals were collected in between.
+    matches_2 = correlation_service.run()
+    leads_2 = lead_generation_service.generate_from_matches(matches_2)
+
+    assert leads_2 == [], "the second run must generate zero new leads"
+    assert lead_repo.count() == 1, "the original lead must still be the only one, not lost"
+    assert lead_repo.list_all(limit=10)[0].id == leads_1[0].id, "the original lead is untouched"
+
+
+def test_pipeline_run_many_times_stays_idempotent_then_reacts_to_new_evidence() -> None:
+    """Requirements 2 and 3: many consecutive no-op pipeline runs stay at one lead, and a
+    genuinely new signal arriving later produces exactly one additional lead."""
+    pipeline = _build_pipeline()
+    signal_service: SignalService = pipeline["signal_service"]  # type: ignore[assignment]
+    verification_service: VerificationService = pipeline["verification_service"]  # type: ignore[assignment]
+    correlation_service: CorrelationService = pipeline["correlation_service"]  # type: ignore[assignment]
+    lead_generation_service: LeadGenerationService = pipeline["lead_generation_service"]  # type: ignore[assignment]
+    lead_repo: InMemoryLeadRepository = pipeline["lead_repo"]  # type: ignore[assignment]
+
+    collector = FakeCollector(
+        [
+            make_signal(
+                signal_type=SignalType.BUILDING_RECORD,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+                county="Harju",
+                municipality="Tallinn",
+            ),
+            make_signal(
+                signal_type=SignalType.ROOF_MENTION,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+                county="Harju",
+                municipality="Tallinn",
+            ),
+        ]
+    )
+    asyncio.run(signal_service.ingest_from_collector(collector))
+    asyncio.run(verification_service.verify_pending_signals(limit=10))
+
+    for _ in range(5):
+        matches = correlation_service.run()
+        lead_generation_service.generate_from_matches(matches)
+    assert lead_repo.count() == 1, "five consecutive no-op runs must not create duplicates"
+
+    # A genuinely new signal arrives (a different county, so it forms its own cluster and
+    # its own rule match distinct from the first) and gets collected + verified.
+    new_collector = FakeCollector(
+        [
+            make_signal(
+                signal_type=SignalType.BUILDING_RECORD,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+                county="Pärnu",
+                municipality="Pärnu",
+            ),
+            make_signal(
+                signal_type=SignalType.ROOF_MENTION,
+                service_category=ServiceCategory.ROOFING,
+                confidence=0.9,
+                verified=VerificationStatus.UNVERIFIED,
+                county="Pärnu",
+                municipality="Pärnu",
+            ),
+        ]
+    )
+    asyncio.run(signal_service.ingest_from_collector(new_collector))
+    asyncio.run(verification_service.verify_pending_signals(limit=10))
+
+    matches = correlation_service.run()
+    new_leads = lead_generation_service.generate_from_matches(matches)
+
+    assert len(new_leads) == 1, "genuinely new evidence must still produce a new lead"
+    assert lead_repo.count() == 2
+
+    # Idempotency holds again for the now-larger, still-unchanged evidence set.
+    for _ in range(3):
+        matches = correlation_service.run()
+        lead_generation_service.generate_from_matches(matches)
+    assert lead_repo.count() == 2, "repeating the run again must still not duplicate anything"
 
 
 def test_weather_events_never_become_leads_in_the_full_pipeline() -> None:

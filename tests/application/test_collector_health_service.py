@@ -10,11 +10,24 @@ from app.application.services.signal_service import SignalService
 from app.application.services.weather_event_service import WeatherEventService
 from app.core.exceptions import CollectorError
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
+from app.repositories.in_memory.collection_unit_of_work import InMemoryCollectionUnitOfWork
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
 from app.repositories.in_memory.weather_repository import InMemoryWeatherEventRepository
 
 from tests.fixtures.factories import make_signal, make_weather_event
 from tests.fixtures.fakes import FakeCollector, FakeWeatherCollector
+
+
+def _signal_service(audit_repo: InMemoryAuditLogRepository) -> SignalService:
+    signal_repo = InMemorySignalRepository()
+    uow = InMemoryCollectionUnitOfWork(signal_repo, InMemoryWeatherEventRepository(), audit_repo)
+    return SignalService(signal_repo, audit_repo, uow)
+
+
+def _weather_service(audit_repo: InMemoryAuditLogRepository) -> WeatherEventService:
+    weather_repo = InMemoryWeatherEventRepository()
+    uow = InMemoryCollectionUnitOfWork(InMemorySignalRepository(), weather_repo, audit_repo)
+    return WeatherEventService(audit_repo, uow)
 
 
 def test_get_health_with_no_run_history_returns_empty() -> None:
@@ -24,7 +37,7 @@ def test_get_health_with_no_run_history_returns_empty() -> None:
 
 def test_get_health_reports_a_successful_run() -> None:
     audit_repo = InMemoryAuditLogRepository()
-    signal_service = SignalService(InMemorySignalRepository(), audit_repo)
+    signal_service = _signal_service(audit_repo)
     collector = FakeCollector([make_signal()], name="ehitisregister")
 
     asyncio.run(signal_service.ingest_from_collector(collector))
@@ -42,7 +55,7 @@ def test_get_health_reports_a_successful_run() -> None:
 
 def test_get_health_surfaces_retry_attempts() -> None:
     audit_repo = InMemoryAuditLogRepository()
-    signal_service = SignalService(InMemorySignalRepository(), audit_repo)
+    signal_service = _signal_service(audit_repo)
     collector = FakeCollector([make_signal()], name="ehitisregister")
     collector.retry_count = 5
 
@@ -54,7 +67,7 @@ def test_get_health_surfaces_retry_attempts() -> None:
 
 def test_get_health_reports_a_failed_run() -> None:
     audit_repo = InMemoryAuditLogRepository()
-    signal_service = SignalService(InMemorySignalRepository(), audit_repo)
+    signal_service = _signal_service(audit_repo)
     collector = FakeCollector([], name="kv_ee", fail=True)
 
     with pytest.raises(CollectorError):
@@ -69,7 +82,7 @@ def test_get_health_reports_a_failed_run() -> None:
 
 def test_get_health_counts_consecutive_failures_since_the_last_success() -> None:
     audit_repo = InMemoryAuditLogRepository()
-    signal_service = SignalService(InMemorySignalRepository(), audit_repo)
+    signal_service = _signal_service(audit_repo)
 
     asyncio.run(signal_service.ingest_from_collector(FakeCollector([make_signal()], name="kv_ee")))
     for _ in range(3):
@@ -85,8 +98,8 @@ def test_get_health_counts_consecutive_failures_since_the_last_success() -> None
 
 def test_get_health_tracks_multiple_collectors_independently() -> None:
     audit_repo = InMemoryAuditLogRepository()
-    signal_service = SignalService(InMemorySignalRepository(), audit_repo)
-    weather_service = WeatherEventService(InMemoryWeatherEventRepository(), audit_repo)
+    signal_service = _signal_service(audit_repo)
+    weather_service = _weather_service(audit_repo)
 
     asyncio.run(
         signal_service.ingest_from_collector(FakeCollector([make_signal()], name="ehitisregister"))

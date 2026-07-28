@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from app.core.exceptions import EntityNotFoundError
 from app.domain.configuration import ConfigurationEntry
-from app.domain.enums import VerificationStatus
+from app.domain.enums import ServiceCategory, VerificationStatus
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
 from app.repositories.in_memory.configuration_repository import InMemoryConfigurationRepository
 from app.repositories.in_memory.lead_repository import InMemoryLeadRepository
@@ -75,50 +75,34 @@ def test_signal_repository_count_respects_filters() -> None:
     assert repo.count(county="Saare") == 0
 
 
-def test_signal_repository_delete_by_source_dry_run_deletes_nothing() -> None:
+def test_signal_repository_list_ids_by_source_matches_only_that_source() -> None:
     repo = InMemorySignalRepository()
-    repo.add(make_signal(source="ehitisregister"))
-    repo.add(make_signal(source="ehitisregister"))
+    first = repo.add(make_signal(source="ehitisregister"))
+    second = repo.add(make_signal(source="ehitisregister"))
     repo.add(make_signal(source="ilmateenistus"))
 
-    previewed = repo.delete_by_source("ehitisregister", dry_run=True)
+    ids = repo.list_ids_by_source("ehitisregister")
 
-    assert previewed == 2
-    assert repo.count() == 3
-
-
-def test_signal_repository_delete_by_source_deletes_only_matching_source() -> None:
-    repo = InMemorySignalRepository()
-    repo.add(make_signal(source="ehitisregister"))
-    repo.add(make_signal(source="ehitisregister"))
-    kept = repo.add(make_signal(source="ilmateenistus"))
-
-    deleted = repo.delete_by_source("ehitisregister")
-
-    assert deleted == 2
-    assert repo.count() == 1
-    assert repo.get_by_id(kept.id) is not None
+    assert set(ids) == {first.id, second.id}
 
 
-def test_signal_repository_delete_by_source_respects_before() -> None:
+def test_signal_repository_list_ids_by_source_respects_before() -> None:
     repo = InMemorySignalRepository()
     now = utc_now()
     old = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(days=10)))
     recent = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(minutes=1)))
 
-    deleted = repo.delete_by_source("ehitisregister", before=now - timedelta(days=1))
+    ids = repo.list_ids_by_source("ehitisregister", before=now - timedelta(days=1))
 
-    assert deleted == 1
-    assert repo.get_by_id(old.id) is None
-    assert repo.get_by_id(recent.id) is not None
+    assert ids == [old.id]
+    assert recent.id not in ids
 
 
-def test_signal_repository_delete_by_source_no_match_returns_zero() -> None:
+def test_signal_repository_list_ids_by_source_no_match_returns_empty() -> None:
     repo = InMemorySignalRepository()
     repo.add(make_signal(source="ehitisregister"))
 
-    assert repo.delete_by_source("does_not_exist") == 0
-    assert repo.count() == 1
+    assert repo.list_ids_by_source("does_not_exist") == []
 
 
 def test_signal_repository_delete_by_ids_deletes_only_the_given_ids() -> None:
@@ -184,6 +168,26 @@ def test_lead_repository_list_referencing_signal_ids_empty_input_returns_empty()
     assert repo.list_referencing_signal_ids([]) == []
 
 
+def test_lead_repository_find_by_identity_matches_same_type_and_signal_set() -> None:
+    repo = InMemoryLeadRepository()
+    signal_ids = [uuid4(), uuid4()]
+    stored = repo.add(
+        make_lead(lead_type=ServiceCategory.ROOFING, supporting_signal_ids=signal_ids)
+    )
+
+    found = repo.find_by_identity(ServiceCategory.ROOFING, list(reversed(signal_ids)))
+
+    assert found is not None
+    assert found.id == stored.id
+
+
+def test_lead_repository_find_by_identity_returns_none_for_different_signal_set() -> None:
+    repo = InMemoryLeadRepository()
+    repo.add(make_lead(lead_type=ServiceCategory.ROOFING, supporting_signal_ids=[uuid4(), uuid4()]))
+
+    assert repo.find_by_identity(ServiceCategory.ROOFING, [uuid4(), uuid4()]) is None
+
+
 def test_weather_repository_add_many_and_count() -> None:
     repo = InMemoryWeatherEventRepository()
     stored = repo.add_many([make_weather_event(), make_weather_event()])
@@ -207,22 +211,17 @@ def test_weather_repository_list_by_region_and_time() -> None:
     )
 
 
-def test_weather_repository_delete_by_source_dry_run_and_real() -> None:
+def test_weather_repository_list_ids_by_source_matches_only_that_source() -> None:
     repo = InMemoryWeatherEventRepository()
-    repo.add(make_weather_event(source="ilmateenistus"))
-    kept = repo.add(make_weather_event(source="other_source"))
+    matching = repo.add(make_weather_event(source="ilmateenistus"))
+    repo.add(make_weather_event(source="other_source"))
 
-    previewed = repo.delete_by_source("ilmateenistus", dry_run=True)
-    assert previewed == 1
-    assert repo.count() == 2
+    ids = repo.list_ids_by_source("ilmateenistus")
 
-    deleted = repo.delete_by_source("ilmateenistus")
-    assert deleted == 1
-    assert repo.count() == 1
-    assert repo.get_by_id(kept.id) is not None
+    assert ids == [matching.id]
 
 
-def test_weather_repository_delete_by_source_respects_before() -> None:
+def test_weather_repository_list_ids_by_source_respects_before() -> None:
     repo = InMemoryWeatherEventRepository()
     now = utc_now()
     old = repo.add(
@@ -240,11 +239,10 @@ def test_weather_repository_delete_by_source_respects_before() -> None:
         )
     )
 
-    deleted = repo.delete_by_source("ilmateenistus", before=now - timedelta(days=1))
+    ids = repo.list_ids_by_source("ilmateenistus", before=now - timedelta(days=1))
 
-    assert deleted == 1
-    assert repo.get_by_id(old.id) is None
-    assert repo.get_by_id(recent.id) is not None
+    assert ids == [old.id]
+    assert recent.id not in ids
 
 
 def test_weather_repository_delete_by_ids_deletes_only_the_given_ids() -> None:

@@ -5,6 +5,14 @@ for a ``WeatherCollectorInterface`` instead of a ``CollectorInterface``.
 Weather events are never turned into Signals or Leads here -- this
 service's sole responsibility is persisting what a weather collector
 reported, with a full audit trail.
+
+Persisting a successful run's WeatherEvents and its completion audit
+entry is delegated to ``CollectionUnitOfWork`` as one atomic write -- see
+``app.application.services.signal_service`` for the full rationale
+(identical here). ``WeatherEventRepository`` is not needed directly by
+this service at all: unlike ``SignalService`` (which also reads via
+``list_unverified``/``list_verified``), every interaction this service
+has with weather events is the atomic write the unit of work now owns.
 """
 
 from __future__ import annotations
@@ -14,7 +22,8 @@ from uuid import uuid4
 
 from loguru import logger
 
-from app.application.interfaces.repositories import AuditLogRepository, WeatherEventRepository
+from app.application.interfaces.collection_unit_of_work import CollectionUnitOfWork
+from app.application.interfaces.repositories import AuditLogRepository
 from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.core.exceptions import CollectorError
 from app.domain.audit import AuditLogEntry
@@ -32,11 +41,11 @@ class WeatherEventService:
 
     def __init__(
         self,
-        weather_event_repository: WeatherEventRepository,
         audit_log_repository: AuditLogRepository,
+        collection_unit_of_work: CollectionUnitOfWork,
     ) -> None:
-        self._weather_event_repository = weather_event_repository
         self._audit_log_repository = audit_log_repository
+        self._collection_unit_of_work = collection_unit_of_work
 
     async def ingest_from_collector(
         self, collector: WeatherCollectorInterface
@@ -79,23 +88,19 @@ class WeatherEventService:
             )
             raise
 
-        stored = self._weather_event_repository.add_many(events)
         duration_seconds = round(time.monotonic() - start, 3)
         execution_id = uuid4()
-
-        self._audit_log_repository.add(
-            AuditLogEntry(
-                event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
-                entity_type="WeatherCollector",
-                message=f"Weather collector {collector.name!r} produced {len(stored)} event(s).",
-                context={
-                    "collector": collector.name,
-                    "event_count": len(stored),
-                    "duration_seconds": duration_seconds,
-                    "retry_attempts": _retry_attempts(collector),
-                    "execution_id": str(execution_id),
-                    "inserted_event_ids": [str(event.id) for event in stored],
-                },
-            )
+        completion_entry = AuditLogEntry(
+            event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
+            entity_type="WeatherCollector",
+            message=f"Weather collector {collector.name!r} produced {len(events)} event(s).",
+            context={
+                "collector": collector.name,
+                "event_count": len(events),
+                "duration_seconds": duration_seconds,
+                "retry_attempts": _retry_attempts(collector),
+                "execution_id": str(execution_id),
+                "inserted_event_ids": [str(event.id) for event in events],
+            },
         )
-        return stored
+        return self._collection_unit_of_work.record_weather_collection(events, completion_entry)

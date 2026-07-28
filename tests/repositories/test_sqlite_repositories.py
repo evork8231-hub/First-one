@@ -9,7 +9,7 @@ import pytest
 from app.core.exceptions import EntityNotFoundError
 from app.domain.audit import AuditLogEntry
 from app.domain.configuration import ConfigurationEntry
-from app.domain.enums import AuditEventType, VerificationStatus
+from app.domain.enums import AuditEventType, ServiceCategory, VerificationStatus
 from app.repositories.sqlite.audit_log_repository import SQLiteAuditLogRepository
 from app.repositories.sqlite.configuration_repository import SQLiteConfigurationRepository
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
@@ -65,41 +65,38 @@ def test_signal_repository_add_many_and_count(sqlite_session_factory) -> None:
     assert repo.add_many([]) == []
 
 
-def test_signal_repository_delete_by_source_dry_run_and_real(sqlite_session_factory) -> None:
+def test_signal_repository_list_ids_by_source_matches_only_that_source(
+    sqlite_session_factory,
+) -> None:
     repo = SQLiteSignalRepository(sqlite_session_factory)
-    repo.add(make_signal(source="ehitisregister"))
-    repo.add(make_signal(source="ehitisregister"))
-    kept = repo.add(make_signal(source="ilmateenistus"))
+    first = repo.add(make_signal(source="ehitisregister"))
+    second = repo.add(make_signal(source="ehitisregister"))
+    repo.add(make_signal(source="ilmateenistus"))
 
-    previewed = repo.delete_by_source("ehitisregister", dry_run=True)
-    assert previewed == 2
-    assert repo.count() == 3
+    ids = repo.list_ids_by_source("ehitisregister")
 
-    deleted = repo.delete_by_source("ehitisregister")
-    assert deleted == 2
-    assert repo.count() == 1
-    assert repo.get_by_id(kept.id) is not None
+    assert set(ids) == {first.id, second.id}
 
 
-def test_signal_repository_delete_by_source_respects_before(sqlite_session_factory) -> None:
+def test_signal_repository_list_ids_by_source_respects_before(sqlite_session_factory) -> None:
     repo = SQLiteSignalRepository(sqlite_session_factory)
     now = utc_now()
     old = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(days=10)))
     recent = repo.add(make_signal(source="ehitisregister", timestamp=now - timedelta(minutes=1)))
 
-    deleted = repo.delete_by_source("ehitisregister", before=now - timedelta(days=1))
+    ids = repo.list_ids_by_source("ehitisregister", before=now - timedelta(days=1))
 
-    assert deleted == 1
-    assert repo.get_by_id(old.id) is None
-    assert repo.get_by_id(recent.id) is not None
+    assert ids == [old.id]
+    assert recent.id not in ids
 
 
-def test_signal_repository_delete_by_source_no_match_returns_zero(sqlite_session_factory) -> None:
+def test_signal_repository_list_ids_by_source_no_match_returns_empty(
+    sqlite_session_factory,
+) -> None:
     repo = SQLiteSignalRepository(sqlite_session_factory)
     repo.add(make_signal(source="ehitisregister"))
 
-    assert repo.delete_by_source("does_not_exist") == 0
-    assert repo.count() == 1
+    assert repo.list_ids_by_source("does_not_exist") == []
 
 
 def test_signal_repository_delete_by_ids_deletes_only_the_given_ids(sqlite_session_factory) -> None:
@@ -175,6 +172,41 @@ def test_lead_repository_list_referencing_signal_ids_no_match_returns_empty(
     assert repo.list_referencing_signal_ids([uuid4()]) == []
 
 
+def test_lead_repository_find_by_identity_matches_same_type_and_signal_set(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    signal_ids = [uuid4(), uuid4()]
+    stored = repo.add(
+        make_lead(lead_type=ServiceCategory.ROOFING, supporting_signal_ids=signal_ids)
+    )
+
+    # Order-independent: a re-run's candidate may list the same ids in a different order.
+    found = repo.find_by_identity(ServiceCategory.ROOFING, list(reversed(signal_ids)))
+
+    assert found is not None
+    assert found.id == stored.id
+
+
+def test_lead_repository_find_by_identity_returns_none_for_different_signal_set(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    repo.add(make_lead(lead_type=ServiceCategory.ROOFING, supporting_signal_ids=[uuid4(), uuid4()]))
+
+    assert repo.find_by_identity(ServiceCategory.ROOFING, [uuid4(), uuid4()]) is None
+
+
+def test_lead_repository_find_by_identity_returns_none_for_different_lead_type(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    signal_ids = [uuid4(), uuid4()]
+    repo.add(make_lead(lead_type=ServiceCategory.ROOFING, supporting_signal_ids=signal_ids))
+
+    assert repo.find_by_identity(ServiceCategory.KITCHEN_REMODELING, signal_ids) is None
+
+
 def test_weather_repository_roundtrip(sqlite_session_factory) -> None:
     repo = SQLiteWeatherEventRepository(sqlite_session_factory)
     event = repo.add(make_weather_event())
@@ -194,22 +226,19 @@ def test_weather_repository_add_many_and_count(sqlite_session_factory) -> None:
     assert repo.add_many([]) == []
 
 
-def test_weather_repository_delete_by_source_dry_run_and_real(sqlite_session_factory) -> None:
+def test_weather_repository_list_ids_by_source_matches_only_that_source(
+    sqlite_session_factory,
+) -> None:
     repo = SQLiteWeatherEventRepository(sqlite_session_factory)
-    repo.add(make_weather_event(source="ilmateenistus"))
-    kept = repo.add(make_weather_event(source="other_source"))
+    matching = repo.add(make_weather_event(source="ilmateenistus"))
+    repo.add(make_weather_event(source="other_source"))
 
-    previewed = repo.delete_by_source("ilmateenistus", dry_run=True)
-    assert previewed == 1
-    assert repo.count() == 2
+    ids = repo.list_ids_by_source("ilmateenistus")
 
-    deleted = repo.delete_by_source("ilmateenistus")
-    assert deleted == 1
-    assert repo.count() == 1
-    assert repo.get_by_id(kept.id) is not None
+    assert ids == [matching.id]
 
 
-def test_weather_repository_delete_by_source_respects_before(sqlite_session_factory) -> None:
+def test_weather_repository_list_ids_by_source_respects_before(sqlite_session_factory) -> None:
     repo = SQLiteWeatherEventRepository(sqlite_session_factory)
     now = utc_now()
     old = repo.add(
@@ -225,11 +254,10 @@ def test_weather_repository_delete_by_source_respects_before(sqlite_session_fact
         )
     )
 
-    deleted = repo.delete_by_source("ilmateenistus", before=now - timedelta(days=1))
+    ids = repo.list_ids_by_source("ilmateenistus", before=now - timedelta(days=1))
 
-    assert deleted == 1
-    assert repo.get_by_id(old.id) is None
-    assert repo.get_by_id(recent.id) is not None
+    assert ids == [old.id]
+    assert recent.id not in ids
 
 
 def test_weather_repository_delete_by_ids_deletes_only_the_given_ids(

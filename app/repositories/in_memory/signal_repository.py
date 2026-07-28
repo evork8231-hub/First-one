@@ -83,19 +83,6 @@ class InMemorySignalRepository(SignalRepository):
             results = [s for s in results if s.municipality == municipality]
         return len(results)
 
-    def delete_by_source(
-        self, source: str, *, before: datetime | None = None, dry_run: bool = False
-    ) -> int:
-        matching_ids = [
-            sid
-            for sid, signal in self._signals.items()
-            if signal.source == source and (before is None or signal.timestamp < before)
-        ]
-        if not dry_run:
-            for sid in matching_ids:
-                del self._signals[sid]
-        return len(matching_ids)
-
     def delete_by_ids(self, signal_ids: Sequence[UUID]) -> int:
         deleted = 0
         for sid in signal_ids:

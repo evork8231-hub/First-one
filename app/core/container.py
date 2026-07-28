@@ -54,6 +54,7 @@ from app.lead_generation.generator import LeadGenerator
 from app.lead_generation.scoring import LeadScorer
 from app.logging.setup import configure_logging
 from app.repositories.sqlite.audit_log_repository import SQLiteAuditLogRepository
+from app.repositories.sqlite.collection_unit_of_work import SQLiteCollectionUnitOfWork
 from app.repositories.sqlite.configuration_repository import SQLiteConfigurationRepository
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
 from app.repositories.sqlite.purge_unit_of_work import SQLitePurgeUnitOfWork
@@ -118,6 +119,9 @@ class Container(containers.DeclarativeContainer):
         SQLiteWeatherBridgeUnitOfWork, session_factory=session_factory
     )
     purge_unit_of_work = providers.Singleton(SQLitePurgeUnitOfWork, session_factory=session_factory)
+    collection_unit_of_work = providers.Singleton(
+        SQLiteCollectionUnitOfWork, session_factory=session_factory
+    )
 
     # --- Collectors --------------------------------------------------------
     # Every collector is registered regardless of whether it is enabled --
@@ -204,6 +208,7 @@ class Container(containers.DeclarativeContainer):
         SignalService,
         signal_repository=signal_repository,
         audit_log_repository=audit_log_repository,
+        collection_unit_of_work=collection_unit_of_work,
     )
     verification_service = providers.Factory(
         VerificationService,
@@ -235,8 +240,8 @@ class Container(containers.DeclarativeContainer):
     )
     weather_event_service = providers.Factory(
         WeatherEventService,
-        weather_event_repository=weather_event_repository,
         audit_log_repository=audit_log_repository,
+        collection_unit_of_work=collection_unit_of_work,
     )
     weather_signal_bridge_service = providers.Factory(
         WeatherSignalBridgeService,

@@ -80,3 +80,12 @@ class InMemoryLeadRepository(LeadRepository):
         return [
             lead for lead in self._leads.values() if wanted.intersection(lead.supporting_signal_ids)
         ]
+
+    def find_by_identity(
+        self, lead_type: ServiceCategory, supporting_signal_ids: Sequence[UUID]
+    ) -> Lead | None:
+        wanted = set(supporting_signal_ids)
+        for lead in self._leads.values():
+            if lead.lead_type == lead_type and set(lead.supporting_signal_ids) == wanted:
+                return lead
+        return None

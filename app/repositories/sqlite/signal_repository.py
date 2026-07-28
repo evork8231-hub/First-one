@@ -107,19 +107,6 @@ class SQLiteSignalRepository(SignalRepository):
                 stmt = stmt.where(SignalModel.municipality == municipality)
             return session.scalar(stmt) or 0
 
-    def delete_by_source(
-        self, source: str, *, before: datetime | None = None, dry_run: bool = False
-    ) -> int:
-        with session_scope(self._session_factory) as session:
-            filters = [SignalModel.source == source]
-            if before is not None:
-                filters.append(SignalModel.timestamp < to_storage_utc(before))
-            count_stmt = select(func.count()).select_from(SignalModel).where(*filters)
-            matching = session.scalar(count_stmt) or 0
-            if not dry_run and matching:
-                session.execute(delete(SignalModel).where(*filters))
-            return matching
-
     def delete_by_ids(self, signal_ids: Sequence[UUID]) -> int:
         if not signal_ids:
             return 0

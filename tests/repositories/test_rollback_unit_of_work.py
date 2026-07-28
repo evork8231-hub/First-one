@@ -127,6 +127,49 @@ def test_atomicity_a_failure_at_commit_leaves_nothing_persisted(
     ), "the rollback audit entry must not have persisted either"
 
 
+def test_delete_signals_and_record_rollback_issues_exactly_one_commit_per_call(
+    sqlite_session_factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A direct regression guard, not just a proxy for it: the test above injects a failure
+    on *every* ``Session.commit`` call, which aborts a hypothetical multi-transaction design
+    on its very first commit just as readily as it aborts this module's real
+    single-transaction design -- so it alone cannot distinguish "one atomic transaction"
+    from "several transactions that all happen to fail here too" (the same lesson already
+    applied to ``tests/repositories/test_weather_bridge_unit_of_work.py`` and
+    ``tests/repositories/test_purge_unit_of_work.py``). Counting ``Session.commit``
+    invocations during one ``delete_signals_and_record_rollback`` call and asserting exactly
+    one is what would actually catch a regression back to a design where the delete and the
+    rollback audit entry were written as two separate transactions.
+    """
+    signal_repo = SQLiteSignalRepository(sqlite_session_factory)
+    uow = SQLiteRollbackUnitOfWork(sqlite_session_factory)
+    to_delete = [
+        signal_repo.add(make_signal(source="ehitisregister")),
+        signal_repo.add(make_signal(source="ehitisregister", county="Pärnu", municipality="Pärnu")),
+    ]
+    entry = _rollback_entry(collector="ehitisregister", execution_id=str(uuid4()), record_count=2)
+
+    commit_calls = 0
+    orig_commit = Session.commit
+
+    def _counting_commit(self: Session) -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        orig_commit(self)
+
+    monkeypatch.setattr(Session, "commit", _counting_commit)
+
+    deleted = uow.delete_signals_and_record_rollback([s.id for s in to_delete], entry)
+
+    assert deleted == 2
+    assert commit_calls == 1, (
+        f"expected exactly one commit for the delete + rollback audit write, got "
+        f"{commit_calls} -- a regression to separate transactions would show 2 and "
+        f"reintroduce the deleted-with-no-audit-trail window this unit of work exists "
+        f"to close."
+    )
+
+
 def test_second_writer_racing_the_same_execution_id_is_rejected(tmp_path) -> None:
     """Two independent connections to the same on-disk database, simulating two
     'sigint rollback --yes' processes racing on the same collector run."""

@@ -23,3 +23,85 @@ def test_generate_from_matches_persists_leads_and_logs_audit() -> None:
     assert len(lead_repo.list_all(limit=10)) == 2
     event_types = [entry.event_type for entry in audit_repo.list_all(limit=10)]
     assert event_types.count(AuditEventType.LEAD_GENERATED) == 2
+
+
+def test_generate_from_matches_is_idempotent_for_identical_evidence() -> None:
+    """Production Blocker 1: re-running generation over the exact same evidence (the same
+    RuleMatches, correlated the exact same way -- what a scheduled 'sigint pipeline' re-run
+    with no new Signals does, since CorrelationService.run() has no incremental filter) must
+    not create a second Lead. The pre-fix LeadGenerationService persisted every candidate
+    LeadGenerator.generate() returned unconditionally, so calling this twice with the same
+    FakeLeadGenerator output would have produced 4 leads, not 2 -- this is exactly the
+    scenario that would fail against the old implementation.
+    """
+    lead_repo = InMemoryLeadRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    candidate = make_lead()
+    # Same LeadGenerator output every call -- simulates correlation re-finding the identical
+    # rule match because the underlying verified Signals have not changed between runs.
+    generator = FakeLeadGenerator([candidate])
+    service = LeadGenerationService(generator, lead_repo, audit_repo)
+
+    first_run = service.generate_from_matches([])
+    second_run = service.generate_from_matches([])
+
+    assert len(first_run) == 1
+    assert second_run == [], "the second run must persist nothing new"
+    assert lead_repo.count() == 1, "exactly one Lead must exist, not a duplicate"
+    assert len(audit_repo.list_all(event_type=AuditEventType.LEAD_GENERATED, limit=10)) == 1
+
+
+def test_generate_from_matches_remains_idempotent_across_many_consecutive_runs() -> None:
+    lead_repo = InMemoryLeadRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    generator = FakeLeadGenerator([make_lead()])
+    service = LeadGenerationService(generator, lead_repo, audit_repo)
+
+    for _ in range(10):
+        service.generate_from_matches([])
+
+    assert lead_repo.count() == 1
+    assert len(audit_repo.list_all(event_type=AuditEventType.LEAD_GENERATED, limit=10)) == 1
+
+
+def test_generate_from_matches_creates_a_new_lead_for_genuinely_new_evidence() -> None:
+    """A different supporting_signal_ids set (new Signals became part of the evidence)
+    is a different real-world identity and must still be generated normally."""
+    lead_repo = InMemoryLeadRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    first_candidate = make_lead()
+    service = LeadGenerationService(FakeLeadGenerator([first_candidate]), lead_repo, audit_repo)
+    service.generate_from_matches([])
+    assert lead_repo.count() == 1
+
+    second_candidate = make_lead()  # make_lead() defaults to a fresh random signal-id pair
+    assert second_candidate.supporting_signal_ids != first_candidate.supporting_signal_ids
+    service_for_new_evidence = LeadGenerationService(
+        FakeLeadGenerator([second_candidate]), lead_repo, audit_repo
+    )
+    persisted = service_for_new_evidence.generate_from_matches([])
+
+    assert len(persisted) == 1
+    assert lead_repo.count() == 2, "new evidence must still produce a new Lead"
+    assert len(audit_repo.list_all(event_type=AuditEventType.LEAD_GENERATED, limit=10)) == 2
+
+
+def test_no_repository_level_uniqueness_constraint_exists() -> None:
+    """Confirms the audit's claim directly: LeadRepository.add() itself has no uniqueness
+    check -- persisting two distinct Lead records (different ids) with identical
+    lead_type/supporting_signal_ids content both succeed via add() alone. Idempotency is
+    therefore a LeadGenerationService responsibility (the find_by_identity check), not
+    something the repository or a database constraint already enforced -- this is exactly
+    why the old LeadGenerationService (unconditional add() per candidate, no check) was able
+    to duplicate Leads in the first place.
+    """
+    lead_repo = InMemoryLeadRepository()
+    shared_signal_ids = make_lead().supporting_signal_ids
+    first = make_lead(supporting_signal_ids=shared_signal_ids)
+    second = make_lead(supporting_signal_ids=shared_signal_ids)
+    assert first.id != second.id  # two distinct records, identical business content
+
+    lead_repo.add(first)
+    lead_repo.add(second)
+
+    assert lead_repo.count() == 2, "the repository layer alone does not prevent duplicates"

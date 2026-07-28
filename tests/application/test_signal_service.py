@@ -9,16 +9,25 @@ from app.application.services.signal_service import SignalService
 from app.core.exceptions import CollectorError
 from app.domain.enums import AuditEventType
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
+from app.repositories.in_memory.collection_unit_of_work import InMemoryCollectionUnitOfWork
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
+from app.repositories.in_memory.weather_repository import InMemoryWeatherEventRepository
 
 from tests.fixtures.factories import make_signal
 from tests.fixtures.fakes import FakeCollector
 
 
+def _service(
+    signal_repo: InMemorySignalRepository, audit_repo: InMemoryAuditLogRepository
+) -> SignalService:
+    uow = InMemoryCollectionUnitOfWork(signal_repo, InMemoryWeatherEventRepository(), audit_repo)
+    return SignalService(signal_repo, audit_repo, uow)
+
+
 def test_ingest_from_collector_persists_signals_and_logs_audit() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collector = FakeCollector([make_signal(), make_signal()])
 
     stored = asyncio.run(service.ingest_from_collector(collector))
@@ -34,7 +43,7 @@ def test_ingest_from_collector_persists_signals_and_logs_audit() -> None:
 def test_ingest_from_collector_failure_is_audit_logged_and_reraised() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collector = FakeCollector([], fail=True)
 
     with pytest.raises(CollectorError):
@@ -49,7 +58,7 @@ def test_ingest_from_collector_reports_zero_retries_when_untracked() -> None:
     """A collector that never tracks retry_count reports 0, honestly, not a guess."""
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collector = FakeCollector([make_signal()])
 
     asyncio.run(service.ingest_from_collector(collector))
@@ -61,7 +70,7 @@ def test_ingest_from_collector_reports_zero_retries_when_untracked() -> None:
 def test_ingest_from_collector_surfaces_the_collectors_retry_count() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collector = FakeCollector([make_signal()])
     collector.retry_count = 3  # simulates a BaseCollector subclass that hit retries
 
@@ -74,7 +83,7 @@ def test_ingest_from_collector_surfaces_the_collectors_retry_count() -> None:
 def test_ingest_from_collector_failure_still_reports_retry_attempts() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collector = FakeCollector([], fail=True)
     collector.retry_count = 2
 
@@ -88,7 +97,7 @@ def test_ingest_from_collector_failure_still_reports_retry_attempts() -> None:
 def test_ingest_from_collector_records_execution_id_and_inserted_signal_ids() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collector = FakeCollector([make_signal(), make_signal()])
 
     stored = asyncio.run(service.ingest_from_collector(collector))
@@ -102,7 +111,7 @@ def test_ingest_from_collector_records_execution_id_and_inserted_signal_ids() ->
 def test_ingest_from_collectors_runs_every_collector_and_persists_all_signals() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collectors = [
         FakeCollector([make_signal()], name="a"),
         FakeCollector([make_signal(), make_signal()], name="b"),
@@ -118,7 +127,7 @@ def test_ingest_from_collectors_runs_every_collector_and_persists_all_signals() 
 def test_ingest_from_collectors_one_failure_does_not_abort_the_batch() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = SignalService(signal_repo, audit_repo)
+    service = _service(signal_repo, audit_repo)
     collectors = [
         FakeCollector([make_signal()], name="good"),
         FakeCollector([], name="bad", fail=True),
