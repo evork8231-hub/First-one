@@ -10,7 +10,9 @@ accident.
 
 Deliberately scoped to Signals and WeatherEvents (see
 ``app.application.services.data_management_service.DataManagementService``
-for why Leads are excluded).
+for why Leads are excluded). Purging Signals refuses the whole operation
+if any of them are still cited by an existing Lead -- see
+``app.core.exceptions.PurgeBlockedByDependentDataError``.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import typer
 from rich.console import Console
 
 from app.core.container import Container
+from app.core.exceptions import PurgeBlockedByDependentDataError
 
 console = Console()
 app = typer.Typer(help="Preview or delete collected data by source (dry-run by default).")
@@ -59,7 +62,11 @@ def purge_signals(
     container: Container = ctx.obj
     service = container.data_management_service()
 
-    affected = service.purge_signals(source, before=parsed_before, dry_run=not yes)
+    try:
+        affected = service.purge_signals(source, before=parsed_before, dry_run=not yes)
+    except PurgeBlockedByDependentDataError as exc:
+        console.print(f"[red]{exc.message}[/red]")
+        raise typer.Exit(code=1) from exc
 
     if yes:
         console.print(f"[bold red]Deleted {affected} signal(s)[/bold red] from source {source!r}.")

@@ -130,3 +130,11 @@ class SQLiteSignalRepository(SignalRepository):
             if matching:
                 session.execute(delete(SignalModel).where(*filters))
             return matching
+
+    def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
+        with session_scope(self._session_factory) as session:
+            filters = [SignalModel.source == source]
+            if before is not None:
+                filters.append(SignalModel.timestamp < to_storage_utc(before))
+            stmt = select(SignalModel.id).where(*filters)
+            return list(session.scalars(stmt))

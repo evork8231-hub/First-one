@@ -18,6 +18,15 @@ This service's only job is making sure a WEATHER_EVENT Signal exists for
 that already-correct logic to see -- exactly once per real occurrence,
 never once per collection run (see
 ``app.verification.weather_bridge_dedup.WeatherBridgeDeduplicator``).
+
+Persisting a bridged event's Signal, its dedup bookkeeping, and its audit
+entry is delegated to ``WeatherBridgeUnitOfWork`` as one atomic write per
+batch -- mirroring ``RollbackService``'s use of ``RollbackUnitOfWork``,
+this service builds *what* to persist (pure, no I/O) and the unit of
+work handles persisting it atomically, so an interrupted collection run
+can never leave a Signal committed with no matching dedup record (which
+would otherwise let the same real occurrence be bridged again on the
+next run).
 """
 
 from __future__ import annotations
@@ -26,7 +35,10 @@ from collections.abc import Sequence
 
 from loguru import logger
 
-from app.application.interfaces.repositories import AuditLogRepository, SignalRepository
+from app.application.interfaces.weather_bridge_unit_of_work import (
+    BridgedEvent,
+    WeatherBridgeUnitOfWork,
+)
 from app.config.settings import WeatherSignalBridgeConfig
 from app.domain.audit import AuditLogEntry
 from app.domain.enums import AuditEventType, SignalType
@@ -41,15 +53,13 @@ class WeatherSignalBridgeService:
 
     def __init__(
         self,
-        signal_repository: SignalRepository,
-        audit_log_repository: AuditLogRepository,
         config: WeatherSignalBridgeConfig,
         deduplicator: WeatherBridgeDeduplicator,
+        weather_bridge_unit_of_work: WeatherBridgeUnitOfWork,
     ) -> None:
-        self._signal_repository = signal_repository
-        self._audit_log_repository = audit_log_repository
         self._config = config
         self._deduplicator = deduplicator
+        self._weather_bridge_unit_of_work = weather_bridge_unit_of_work
 
     def bridge(self, events: Sequence[WeatherEvent]) -> list[Signal]:
         """Build and persist one Signal per not-already-bridged event, returning the stored copies.
@@ -74,6 +84,11 @@ class WeatherSignalBridgeService:
         forecast was published," which happened now. The forecast's own
         period remains fully available in ``metadata`` and in the linked
         WeatherEvent record.
+
+        Every new event's Signal, dedup entry, and audit entry are
+        persisted together as one atomic batch (see
+        ``WeatherBridgeUnitOfWork``) -- if persistence fails partway
+        through, nothing in the batch is left committed.
         """
         if not events:
             return []
@@ -98,28 +113,27 @@ class WeatherSignalBridgeService:
         if not new_events:
             return []
 
-        candidates = [self._to_signal(event) for event in new_events]
-        stored = self._signal_repository.add_many(candidates)
+        bridged = [self._build_bridged_event(event) for event in new_events]
+        return self._weather_bridge_unit_of_work.bridge_events(bridged)
 
-        for signal, event in zip(stored, new_events, strict=True):
-            self._deduplicator.mark_bridged(event, signal_id=str(signal.id))
-            self._audit_log_repository.add(
-                AuditLogEntry(
-                    event_type=AuditEventType.SIGNAL_INGESTED,
-                    entity_type="Signal",
-                    entity_id=signal.id,
-                    message=(
-                        f"Bridged weather event {event.id} ({event.event_type.value}) into a "
-                        f"WEATHER_EVENT signal."
-                    ),
-                    context={
-                        "source": "weather_signal_bridge",
-                        "weather_event_id": str(event.id),
-                        "weather_event_type": event.event_type.value,
-                    },
-                )
-            )
-        return stored
+    def _build_bridged_event(self, event: WeatherEvent) -> BridgedEvent:
+        signal = self._to_signal(event)
+        dedup_entry = self._deduplicator.build_bridged_entry(event, signal_id=str(signal.id))
+        audit_entry = AuditLogEntry(
+            event_type=AuditEventType.SIGNAL_INGESTED,
+            entity_type="Signal",
+            entity_id=signal.id,
+            message=(
+                f"Bridged weather event {event.id} ({event.event_type.value}) into a "
+                f"WEATHER_EVENT signal."
+            ),
+            context={
+                "source": "weather_signal_bridge",
+                "weather_event_id": str(event.id),
+                "weather_event_type": event.event_type.value,
+            },
+        )
+        return BridgedEvent(signal=signal, dedup_entry=dedup_entry, audit_entry=audit_entry)
 
     def _to_signal(self, event: WeatherEvent) -> Signal:
         return Signal(

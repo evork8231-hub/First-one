@@ -97,6 +97,16 @@ class SignalRepository(ABC):
         rows belong to a run.
         """
 
+    @abstractmethod
+    def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
+        """Return the ids of every signal :meth:`delete_by_source` would delete for these filters.
+
+        Used by ``app.application.services.data_management_service.DataManagementService``
+        to check, *before* deleting anything, whether any of those exact
+        signals are still cited by a Lead -- see
+        ``LeadRepository.list_referencing_signal_ids``.
+        """
+
 
 class LeadRepository(ABC):
     """Persistence boundary for Lead entities."""

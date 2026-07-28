@@ -103,3 +103,10 @@ class InMemorySignalRepository(SignalRepository):
                 del self._signals[sid]
                 deleted += 1
         return deleted
+
+    def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
+        return [
+            sid
+            for sid, signal in self._signals.items()
+            if signal.source == source and (before is None or signal.timestamp < before)
+        ]

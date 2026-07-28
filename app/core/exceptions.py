@@ -137,3 +137,20 @@ class RollbackConflictError(RollbackError):
     which is instead reported as ``EntityNotFoundError`` by
     ``RollbackService`` before any transaction is opened.
     """
+
+
+class DataManagementError(AppError):
+    """Base class for errors raised by destructive data-management operations (purge)."""
+
+
+class PurgeBlockedByDependentDataError(DataManagementError):
+    """Raised when a purge would delete Signals still cited by an existing Lead.
+
+    Mirrors ``RollbackBlockedByDependentDataError``: deleting a Signal
+    that a Lead's ``supporting_signal_ids`` still references would leave
+    that Lead pointing at a record that no longer exists. Purge refuses
+    the whole operation rather than silently deleting the Signal or
+    silently rewriting the Lead -- see
+    ``app.application.services.data_management_service.DataManagementService``
+    for the full rationale.
+    """

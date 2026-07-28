@@ -30,6 +30,9 @@ from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepo
 from app.repositories.in_memory.configuration_repository import InMemoryConfigurationRepository
 from app.repositories.in_memory.lead_repository import InMemoryLeadRepository
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
+from app.repositories.in_memory.weather_bridge_unit_of_work import (
+    InMemoryWeatherBridgeUnitOfWork,
+)
 from app.repositories.in_memory.weather_repository import InMemoryWeatherEventRepository
 from app.rule_engine.engine import RuleEngine
 from app.verification.duplicate_detector import DuplicateDetector
@@ -55,6 +58,7 @@ def _build_pipeline(*, rule: Rule | None = None) -> dict[str, object]:
     lead_repo = InMemoryLeadRepository()
     weather_repo = InMemoryWeatherEventRepository()
     audit_repo = InMemoryAuditLogRepository()
+    config_repo = InMemoryConfigurationRepository()
 
     dup_config = DuplicateDetectionConfig()
     signal_verifiers = [
@@ -80,10 +84,9 @@ def _build_pipeline(*, rule: Rule | None = None) -> dict[str, object]:
         "signal_service": SignalService(signal_repo, audit_repo),
         "weather_event_service": WeatherEventService(weather_repo, audit_repo),
         "weather_signal_bridge_service": WeatherSignalBridgeService(
-            signal_repo,
-            audit_repo,
             WeatherSignalBridgeConfig(),
-            WeatherBridgeDeduplicator(InMemoryConfigurationRepository()),
+            WeatherBridgeDeduplicator(config_repo),
+            InMemoryWeatherBridgeUnitOfWork(signal_repo, config_repo, audit_repo),
         ),
         "verification_service": VerificationService(
             signal_repo, lead_repo, audit_repo, signal_verifiers, lead_verifiers

@@ -73,13 +73,31 @@ class WeatherBridgeDeduplicator:
         fingerprint = compute_fingerprint(event)
         return self._configuration_repository.get(_fingerprint_key(fingerprint)) is not None
 
-    def mark_bridged(self, event: WeatherEvent, *, signal_id: str) -> None:
-        """Record that ``event`` has now been bridged into the Signal ``signal_id``."""
+    def build_bridged_entry(self, event: WeatherEvent, *, signal_id: str) -> ConfigurationEntry:
+        """Build (without persisting) the entry that records ``event`` as bridged.
+
+        For callers that need to persist this atomically alongside other
+        writes -- see
+        ``app.application.services.weather_signal_bridge_service.WeatherSignalBridgeService``,
+        which passes the result to
+        ``app.application.interfaces.weather_bridge_unit_of_work.WeatherBridgeUnitOfWork``
+        instead of calling :meth:`mark_bridged` directly, so the dedup
+        bookkeeping commits in the same transaction as the Signal it
+        describes.
+        """
         fingerprint = compute_fingerprint(event)
-        self._configuration_repository.set(
-            ConfigurationEntry(
-                key=_fingerprint_key(fingerprint),
-                value={"weather_event_id": str(event.id), "signal_id": signal_id},
-                description=("Auto-maintained by WeatherBridgeDeduplicator; do not edit by hand."),
-            )
+        return ConfigurationEntry(
+            key=_fingerprint_key(fingerprint),
+            value={"weather_event_id": str(event.id), "signal_id": signal_id},
+            description="Auto-maintained by WeatherBridgeDeduplicator; do not edit by hand.",
         )
+
+    def mark_bridged(self, event: WeatherEvent, *, signal_id: str) -> None:
+        """Record that ``event`` has now been bridged into the Signal ``signal_id``.
+
+        Immediately persists via ``ConfigurationRepository`` in its own
+        transaction -- fine for a standalone caller, but see
+        :meth:`build_bridged_entry` if the caller needs this write to
+        commit atomically alongside other writes.
+        """
+        self._configuration_repository.set(self.build_bridged_entry(event, signal_id=signal_id))

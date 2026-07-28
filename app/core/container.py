@@ -58,6 +58,7 @@ from app.repositories.sqlite.configuration_repository import SQLiteConfiguration
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
 from app.repositories.sqlite.rollback_unit_of_work import SQLiteRollbackUnitOfWork
 from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
+from app.repositories.sqlite.weather_bridge_unit_of_work import SQLiteWeatherBridgeUnitOfWork
 from app.repositories.sqlite.weather_repository import SQLiteWeatherEventRepository
 from app.rule_engine.engine import RuleEngine
 from app.rule_engine.loader import RuleLoader
@@ -111,6 +112,9 @@ class Container(containers.DeclarativeContainer):
     )
     rollback_unit_of_work = providers.Singleton(
         SQLiteRollbackUnitOfWork, session_factory=session_factory
+    )
+    weather_bridge_unit_of_work = providers.Singleton(
+        SQLiteWeatherBridgeUnitOfWork, session_factory=session_factory
     )
 
     # --- Collectors --------------------------------------------------------
@@ -234,15 +238,15 @@ class Container(containers.DeclarativeContainer):
     )
     weather_signal_bridge_service = providers.Factory(
         WeatherSignalBridgeService,
-        signal_repository=signal_repository,
-        audit_log_repository=audit_log_repository,
         config=settings.provided.weather_signal_bridge,
         deduplicator=weather_bridge_deduplicator,
+        weather_bridge_unit_of_work=weather_bridge_unit_of_work,
     )
     data_management_service = providers.Factory(
         DataManagementService,
         signal_repository=signal_repository,
         weather_event_repository=weather_event_repository,
+        lead_repository=lead_repository,
         audit_log_repository=audit_log_repository,
     )
     collector_health_service = providers.Factory(
