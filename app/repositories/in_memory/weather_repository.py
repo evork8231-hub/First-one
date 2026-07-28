@@ -67,3 +67,10 @@ class InMemoryWeatherEventRepository(WeatherEventRepository):
                 del self._events[eid]
                 deleted += 1
         return deleted
+
+    def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
+        return [
+            eid
+            for eid, event in self._events.items()
+            if event.source == source and (before is None or event.started_at < before)
+        ]

@@ -89,3 +89,11 @@ class SQLiteWeatherEventRepository(WeatherEventRepository):
             if matching:
                 session.execute(delete(WeatherEventModel).where(*filters))
             return matching
+
+    def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
+        with session_scope(self._session_factory) as session:
+            filters = [WeatherEventModel.source == source]
+            if before is not None:
+                filters.append(WeatherEventModel.started_at < to_storage_utc(before))
+            stmt = select(WeatherEventModel.id).where(*filters)
+            return list(session.scalars(stmt))

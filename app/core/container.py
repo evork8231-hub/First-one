@@ -56,6 +56,7 @@ from app.logging.setup import configure_logging
 from app.repositories.sqlite.audit_log_repository import SQLiteAuditLogRepository
 from app.repositories.sqlite.configuration_repository import SQLiteConfigurationRepository
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
+from app.repositories.sqlite.purge_unit_of_work import SQLitePurgeUnitOfWork
 from app.repositories.sqlite.rollback_unit_of_work import SQLiteRollbackUnitOfWork
 from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
 from app.repositories.sqlite.weather_bridge_unit_of_work import SQLiteWeatherBridgeUnitOfWork
@@ -116,6 +117,7 @@ class Container(containers.DeclarativeContainer):
     weather_bridge_unit_of_work = providers.Singleton(
         SQLiteWeatherBridgeUnitOfWork, session_factory=session_factory
     )
+    purge_unit_of_work = providers.Singleton(SQLitePurgeUnitOfWork, session_factory=session_factory)
 
     # --- Collectors --------------------------------------------------------
     # Every collector is registered regardless of whether it is enabled --
@@ -247,7 +249,7 @@ class Container(containers.DeclarativeContainer):
         signal_repository=signal_repository,
         weather_event_repository=weather_event_repository,
         lead_repository=lead_repository,
-        audit_log_repository=audit_log_repository,
+        purge_unit_of_work=purge_unit_of_work,
     )
     collector_health_service = providers.Factory(
         CollectorHealthService, audit_log_repository=audit_log_repository

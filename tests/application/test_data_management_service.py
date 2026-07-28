@@ -11,6 +11,7 @@ from app.core.exceptions import PurgeBlockedByDependentDataError
 from app.domain.enums import AuditEventType
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
 from app.repositories.in_memory.lead_repository import InMemoryLeadRepository
+from app.repositories.in_memory.purge_unit_of_work import InMemoryPurgeUnitOfWork
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
 from app.repositories.in_memory.weather_repository import InMemoryWeatherEventRepository
 from app.utils.time import utc_now
@@ -29,7 +30,8 @@ def _service() -> tuple[
     weather_repo = InMemoryWeatherEventRepository()
     lead_repo = InMemoryLeadRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = DataManagementService(signal_repo, weather_repo, lead_repo, audit_repo)
+    purge_uow = InMemoryPurgeUnitOfWork(signal_repo, weather_repo, audit_repo)
+    service = DataManagementService(signal_repo, weather_repo, lead_repo, purge_uow)
     return service, signal_repo, weather_repo, lead_repo, audit_repo
 
 

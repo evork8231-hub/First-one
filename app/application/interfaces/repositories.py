@@ -208,6 +208,18 @@ class WeatherEventRepository(ABC):
         See ``SignalRepository.delete_by_ids`` for the same contract and rationale.
         """
 
+    @abstractmethod
+    def list_ids_by_source(self, source: str, *, before: datetime | None = None) -> list[UUID]:
+        """Return the ids of every weather event :meth:`delete_by_source` would delete for
+        these filters.
+
+        See ``SignalRepository.list_ids_by_source`` for the same contract and rationale --
+        used by ``app.application.services.data_management_service.DataManagementService``
+        to obtain an explicit id set before handing it to
+        ``app.application.interfaces.purge_unit_of_work.PurgeUnitOfWork`` for atomic
+        deletion.
+        """
+
 
 class AuditLogRepository(ABC):
     """Persistence boundary for AuditLogEntry records."""
