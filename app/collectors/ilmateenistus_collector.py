@@ -88,16 +88,7 @@ class IlmateenistusCollector(BaseWeatherCollector):
                 "collector (see docs/CONFIGURATION.md)."
             )
 
-        http_config = HttpCollectorConfig(
-            base_url=self._config.base_url,
-            timeout_seconds=self._config.timeout_seconds,
-            request_delay_seconds=self._config.request_delay_seconds,
-            max_retries=self._config.max_retries,
-            cache_enabled=self._config.cache_enabled,
-            cache_ttl_seconds=self._config.cache_ttl_seconds,
-        )
-        async with HttpClient(http_config, retry_policy=self._retry_policy) as client:
-            xml_text = await client.get_text(self._config.xml_url)
+        xml_text = await self.fetch_raw_feed_text(self._config.xml_url)
 
         root = safe_parse_xml(xml_text)
         parent_map = {child: parent for parent in root.iter() for child in parent}
@@ -118,6 +109,34 @@ class IlmateenistusCollector(BaseWeatherCollector):
             )
         logger.info("Ilmateenistus collector produced {} severe-weather event(s).", len(events))
         return events
+
+    async def fetch_raw_feed_text(self, url: str) -> str:
+        """Fetch and return the raw response text of ``url``, using this collector's HTTP settings.
+
+        For operator-facing inspection tools (e.g. ``sigint inspect-xml``)
+        that need the real feed content without running full WeatherEvent
+        parsing. ``url`` is a caller-supplied parameter, not necessarily
+        ``self._config.xml_url`` -- an operator can inspect a candidate
+        feed URL before ever setting ``xml_url`` in configuration. Uses
+        the same HTTP client construction as :meth:`collect` (see
+        :meth:`_build_http_config`), so a tool built on this sees exactly
+        what a real collection run would see.
+        """
+        http_config = self._build_http_config()
+        async with HttpClient(http_config, retry_policy=self._retry_policy) as client:
+            text = await client.get_text(url)
+            self.retry_count = client.retry_count
+        return text
+
+    def _build_http_config(self) -> HttpCollectorConfig:
+        return HttpCollectorConfig(
+            base_url=self._config.base_url,
+            timeout_seconds=self._config.timeout_seconds,
+            request_delay_seconds=self._config.request_delay_seconds,
+            max_retries=self._config.max_retries,
+            cache_enabled=self._config.cache_enabled,
+            cache_ttl_seconds=self._config.cache_ttl_seconds,
+        )
 
     def _place_to_event(
         self,

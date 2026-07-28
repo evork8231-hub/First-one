@@ -26,6 +26,7 @@ class CollectorHealthReport:
     last_run_at: datetime
     last_duration_seconds: float | None
     last_item_count: int | None
+    last_retry_attempts: int | None
     consecutive_failures: int
     last_error: str | None
 
@@ -83,6 +84,7 @@ class CollectorHealthService:
                         if "signal_count" in latest_entry.context
                         else latest_entry.context.get("event_count")
                     ),
+                    last_retry_attempts=latest_entry.context.get("retry_attempts"),
                     consecutive_failures=consecutive_failures,
                     last_error=None if latest_succeeded else latest_entry.message,
                 )

@@ -158,6 +158,63 @@ def test_collect_raises_on_repeated_server_error(monkeypatch: pytest.MonkeyPatch
         asyncio.run(collector.collect())
 
 
+def test_collect_tracks_retry_count_on_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 503 followed by a success must be reflected in collector.retry_count."""
+    attempts = {"dataset": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/datasets/ehitisregister":
+            attempts["dataset"] += 1
+            if attempts["dataset"] == 1:
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                json={"resources": [{"format": "json", "url": "/files/ehitisregister.json"}]},
+            )
+        if request.url.path == "/files/ehitisregister.json":
+            return httpx.Response(200, json=[_VALID_RECORD])
+        return httpx.Response(404)
+
+    _patch_http_client(monkeypatch, httpx.MockTransport(handler))
+    collector = EhitisregisterCollector(
+        EhitisregisterConfig(max_retries=2),
+        retry_policy=RetryPolicy(max_retries=2, initial_backoff_seconds=0.001),
+    )
+
+    assert collector.retry_count == 0
+    signals = asyncio.run(collector.collect())
+
+    assert len(signals) == 2
+    assert collector.retry_count == 1
+
+
+def test_sample_raw_records_tracks_retry_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = {"resource": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/datasets/ehitisregister":
+            return httpx.Response(
+                200, json={"resources": [{"format": "json", "url": "/files/ehitisregister.json"}]}
+            )
+        if request.url.path == "/files/ehitisregister.json":
+            attempts["resource"] += 1
+            if attempts["resource"] == 1:
+                return httpx.Response(503)
+            return httpx.Response(200, json=[_VALID_RECORD])
+        return httpx.Response(404)
+
+    _patch_http_client(monkeypatch, httpx.MockTransport(handler))
+    collector = EhitisregisterCollector(
+        EhitisregisterConfig(max_retries=2),
+        retry_policy=RetryPolicy(max_retries=2, initial_backoff_seconds=0.001),
+    )
+
+    sampled = asyncio.run(collector.sample_raw_records())
+
+    assert sampled == [_VALID_RECORD]
+    assert collector.retry_count == 1
+
+
 def test_collector_identity() -> None:
     collector = EhitisregisterCollector(EhitisregisterConfig())
     assert collector.name == "ehitisregister"

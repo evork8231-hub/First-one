@@ -29,10 +29,12 @@ from dependency_injector import containers, providers
 from app.application.interfaces.collector import CollectorInterface
 from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.application.services.collector_health_service import CollectorHealthService
+from app.application.services.collector_lifecycle_service import CollectorLifecycleService
 from app.application.services.correlation_service import CorrelationService
 from app.application.services.data_management_service import DataManagementService
 from app.application.services.export_service import ExportService
 from app.application.services.lead_generation_service import LeadGenerationService
+from app.application.services.rollback_service import RollbackService
 from app.application.services.signal_service import SignalService
 from app.application.services.verification_service import VerificationService
 from app.application.services.weather_event_service import WeatherEventService
@@ -63,6 +65,7 @@ from app.verification.duplicate_signal_verifier import DuplicateSignalVerifier
 from app.verification.schema_drift import SchemaDriftDetector
 from app.verification.structural_lead_verifier import StructuralLeadVerifier
 from app.verification.structural_signal_verifier import StructuralSignalVerifier
+from app.verification.weather_bridge_dedup import WeatherBridgeDeduplicator
 
 
 def _build_collector_registry(*collectors: CollectorInterface) -> CollectorRegistry:
@@ -172,6 +175,9 @@ class Container(containers.DeclarativeContainer):
         configuration_repository=configuration_repository,
         audit_log_repository=audit_log_repository,
     )
+    weather_bridge_deduplicator = providers.Factory(
+        WeatherBridgeDeduplicator, configuration_repository=configuration_repository
+    )
 
     # --- Correlation & rules --------------------------------------------------------
     correlation_engine = providers.Singleton(CorrelationEngine)
@@ -227,6 +233,7 @@ class Container(containers.DeclarativeContainer):
         signal_repository=signal_repository,
         audit_log_repository=audit_log_repository,
         config=settings.provided.weather_signal_bridge,
+        deduplicator=weather_bridge_deduplicator,
     )
     data_management_service = providers.Factory(
         DataManagementService,
@@ -236,4 +243,13 @@ class Container(containers.DeclarativeContainer):
     )
     collector_health_service = providers.Factory(
         CollectorHealthService, audit_log_repository=audit_log_repository
+    )
+    rollback_service = providers.Factory(
+        RollbackService,
+        signal_repository=signal_repository,
+        weather_event_repository=weather_event_repository,
+        audit_log_repository=audit_log_repository,
+    )
+    collector_lifecycle_service = providers.Factory(
+        CollectorLifecycleService, configuration_repository=configuration_repository
     )

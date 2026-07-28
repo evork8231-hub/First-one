@@ -71,6 +71,7 @@ class FakeBrowserClient:
         self._links_by_search_url = links_by_search_url
         self._html_by_listing_url = html_by_listing_url
         self._fail_urls = fail_urls
+        self.retry_count = 0
 
     async def __aenter__(self) -> Self:
         return self

@@ -29,10 +29,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from app.collectors.http_client import HttpClient
 from app.collectors.xml_schema_inspector import XmlSchemaReport
 from app.collectors.xml_schema_inspector import inspect_xml as inspect_xml_document
-from app.config.settings import HttpCollectorConfig
 from app.core.container import Container
 from app.core.exceptions import CollectorError
 
@@ -93,15 +91,9 @@ def inspect_xml(
     else:
         assert url is not None
         container: Container = ctx.obj
-        ilmateenistus_config = container.settings().collectors.ilmateenistus
-        http_config = HttpCollectorConfig(
-            base_url=ilmateenistus_config.base_url,
-            timeout_seconds=ilmateenistus_config.timeout_seconds,
-            request_delay_seconds=ilmateenistus_config.request_delay_seconds,
-            max_retries=ilmateenistus_config.max_retries,
-        )
+        collector = container.ilmateenistus_collector()
         try:
-            xml_text = asyncio.run(_fetch(http_config, url))
+            xml_text = asyncio.run(collector.fetch_raw_feed_text(url))
         except CollectorError as exc:
             console.print(f"[red]Could not fetch {url!r}: {exc.message}[/red]")
             raise typer.Exit(code=1) from exc
@@ -116,11 +108,6 @@ def inspect_xml(
 
     if interactive:
         _run_interactive_review(report)
-
-
-async def _fetch(http_config: HttpCollectorConfig, url: str) -> str:
-    async with HttpClient(http_config) as client:
-        return await client.get_text(url)
 
 
 def _print_report(report: XmlSchemaReport) -> None:

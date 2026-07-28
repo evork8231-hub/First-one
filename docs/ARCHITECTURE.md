@@ -227,7 +227,13 @@ Enforced in code, not just policy:
   real data. `service_category`/`confidence` for the bridged Signal come
   from the explicit, documented `weather_signal_bridge` config block
   (default `roofing`/`0.8`), not from inference on the event's content --
-  see `docs/CONFIGURATION.md`.
+  see `docs/CONFIGURATION.md`. The bridge is deduplicated: a WeatherEvent
+  fingerprinted by event type, location, forecast period, severity, and
+  source (see `app.verification.weather_bridge_dedup.WeatherBridgeDeduplicator`)
+  is bridged into a Signal exactly once, even if the same real occurrence
+  is re-collected on a later run -- otherwise a source queried
+  repeatedly (e.g. an hourly cron) would create an unbounded number of
+  duplicate WEATHER_EVENT signals for the same real event.
 - The Ehitisregister X-tee adapter
   (`app.collectors.ehitisregister_xtee_collector.EhitisregisterXTeeCollector`)
   remains intentionally disabled: X-tee is a real, documented access path

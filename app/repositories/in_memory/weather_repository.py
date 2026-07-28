@@ -59,3 +59,11 @@ class InMemoryWeatherEventRepository(WeatherEventRepository):
             for eid in matching_ids:
                 del self._events[eid]
         return len(matching_ids)
+
+    def delete_by_ids(self, event_ids: Sequence[UUID]) -> int:
+        deleted = 0
+        for eid in event_ids:
+            if eid in self._events:
+                del self._events[eid]
+                deleted += 1
+        return deleted

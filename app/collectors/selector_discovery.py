@@ -10,16 +10,19 @@ live source.
 This module performs pure, offline HTML analysis -- it detects
 structural patterns already present in a downloaded page (JSON-LD
 blocks, repeated sibling elements that look like listing cards,
-grouped anchor tags, price-like and postal-code-like text) and reports
-them as candidates with occurrence counts and samples. It never invents
-a selector, never picks one automatically, and never writes
-configuration: every finding is a diagnostic for an operator to review
-and, if correct, copy into ``listing_link_selector`` themselves.
+grouped anchor tags, price-like text, and address-like text: postal
+codes, street name + house number pairs, and known Estonian city names)
+and reports them as candidates with occurrence counts and samples. It
+never invents a selector, never fabricates an address by combining
+unrelated fragments, and never writes configuration: every finding is a
+diagnostic, backed by a literal match in the real page, for an operator
+to review and, if correct, copy into ``listing_link_selector`` themselves.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
@@ -33,6 +36,51 @@ _PRICE_PATTERN = re.compile(
 )
 _POSTAL_CODE_PATTERN = re.compile(r"\b\d{5}\b")
 _IGNORED_HREF_PREFIXES = ("#", "javascript:", "mailto:", "tel:")
+
+#: Common Estonian street-name suffixes. A match requires a capitalized
+#: name immediately followed by one of these and a house number, all in
+#: the real page text -- the match itself is the evidence, never a
+#: street name and a house number stitched together from separate parts
+#: of the page.
+_STREET_SUFFIXES = (
+    "tänav",
+    "tn",
+    "maantee",
+    "mnt",
+    "puiestee",
+    "pst",
+    "tee",
+    "väljak",
+    "põik",
+)
+_STREET_ADDRESS_PATTERN = re.compile(
+    r"[A-ZÕÄÖÜŠŽ][\wÕÄÖÜŠŽõäöüšž'-]*(?:\s[A-ZÕÄÖÜŠŽ][\wÕÄÖÜŠŽõäöüšž'-]*)?\s"
+    rf"(?:{'|'.join(_STREET_SUFFIXES)})\.?\s\d{{1,4}}[a-eA-E]?\b"
+)
+
+#: Non-exhaustive list of real Estonian city/town names used only to
+#: flag a *literal, exact* match already present in the page text --
+#: never used to construct or guess a place name that isn't there.
+_KNOWN_ESTONIAN_CITIES = (
+    "Tallinn",
+    "Tartu",
+    "Pärnu",
+    "Narva",
+    "Kuressaare",
+    "Viljandi",
+    "Rakvere",
+    "Maardu",
+    "Sillamäe",
+    "Kohtla-Järve",
+    "Võru",
+    "Haapsalu",
+    "Paide",
+    "Keila",
+    "Elva",
+    "Jõhvi",
+    "Türi",
+    "Põlva",
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +113,8 @@ class SelectorDiscoveryReport:
     listing_link_candidates: list[LinkCandidate]
     price_text_samples: list[str]
     postal_code_samples: list[str]
+    street_address_samples: list[str]
+    city_name_samples: list[str]
 
 
 def analyze_html(
@@ -92,6 +142,8 @@ def analyze_html(
     text = soup.get_text(separator=" ")
     price_samples = _unique_matches(_PRICE_PATTERN, text, limit=10)
     postal_samples = _unique_matches(_POSTAL_CODE_PATTERN, text, limit=10)
+    street_samples = _unique_matches(_STREET_ADDRESS_PATTERN, text, limit=10)
+    city_samples = _find_city_samples(text, _KNOWN_ESTONIAN_CITIES, limit=10)
 
     return SelectorDiscoveryReport(
         jsonld_block_count=len(jsonld_blocks),
@@ -100,6 +152,8 @@ def analyze_html(
         listing_link_candidates=listing_links,
         price_text_samples=price_samples,
         postal_code_samples=postal_samples,
+        street_address_samples=street_samples,
+        city_name_samples=city_samples,
     )
 
 
@@ -171,6 +225,22 @@ def _find_link_candidates(
     ]
     candidates.sort(key=lambda candidate: candidate.occurrence_count, reverse=True)
     return candidates[:max_candidates]
+
+
+def _find_city_samples(text: str, known_cities: Sequence[str], *, limit: int) -> list[str]:
+    """Return every ``known_cities`` entry found as an exact, whole-word match in ``text``.
+
+    Never fuzzy-matched and never guessed from an unrelated fragment --
+    only a literal, case-sensitive substring of the real page counts as
+    evidence.
+    """
+    found: list[str] = []
+    for city in known_cities:
+        if re.search(rf"\b{re.escape(city)}\b", text):
+            found.append(city)
+        if len(found) >= limit:
+            break
+    return found
 
 
 def _unique_matches(pattern: re.Pattern[str], text: str, *, limit: int) -> list[str]:

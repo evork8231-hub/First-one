@@ -103,6 +103,8 @@ class BaseListingCollector(BaseCollector):
                     continue
                 signals.extend(self._parse_listing(html, url))
 
+            self.retry_count = browser.retry_count
+
         logger.info(
             "{} collector produced {} signal(s) from {} listing(s) discovered.",
             self.name,
@@ -110,6 +112,21 @@ class BaseListingCollector(BaseCollector):
             len(listing_urls),
         )
         return signals
+
+    async def fetch_page_html(self, url: str) -> str:
+        """Fetch and return the fully rendered HTML of ``url`` using this collector's settings.
+
+        For operator-facing inspection tools (e.g. ``sigint discover-selectors``)
+        that need a real rendered page without running full listing
+        discovery/parsing. ``url`` is a caller-supplied parameter -- an
+        operator can inspect any page (a search-results page, a single
+        listing) regardless of whether ``search_paths``/``listing_link_selector``
+        are configured yet.
+        """
+        async with BrowserClient(self._config, retry_policy=self._retry_policy) as browser:
+            html = await browser.fetch_rendered_html(url)
+            self.retry_count = browser.retry_count
+        return html
 
     def _parse_listing(self, html: str, source_url: str) -> list[Signal]:
         blocks = extract_jsonld_blocks(html)

@@ -23,6 +23,7 @@ from app.cli.commands import (
     inspect_xml_cmd,
     pipeline_cmd,
     purge_cmd,
+    rollback_cmd,
     score_cmd,
     stats_cmd,
     verify_cmd,
@@ -65,6 +66,11 @@ app.add_typer(
     purge_cmd.app,
     name="purge",
     help="Preview or delete collected data by source (dry-run default).",
+)
+app.add_typer(
+    rollback_cmd.app,
+    name="rollback",
+    help="Preview or undo the last completed run of a collector (dry-run default).",
 )
 
 

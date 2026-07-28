@@ -45,6 +45,60 @@ def test_ingest_from_collector_failure_is_audit_logged_and_reraised() -> None:
     assert AuditEventType.COLLECTOR_RUN_FAILED in event_types
 
 
+def test_ingest_from_collector_reports_zero_retries_when_untracked() -> None:
+    """A collector that never tracks retry_count reports 0, honestly, not a guess."""
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = SignalService(signal_repo, audit_repo)
+    collector = FakeCollector([make_signal()])
+
+    asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_COMPLETED, limit=10)
+    assert entries[0].context["retry_attempts"] == 0
+
+
+def test_ingest_from_collector_surfaces_the_collectors_retry_count() -> None:
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = SignalService(signal_repo, audit_repo)
+    collector = FakeCollector([make_signal()])
+    collector.retry_count = 3  # simulates a BaseCollector subclass that hit retries
+
+    asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_COMPLETED, limit=10)
+    assert entries[0].context["retry_attempts"] == 3
+
+
+def test_ingest_from_collector_failure_still_reports_retry_attempts() -> None:
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = SignalService(signal_repo, audit_repo)
+    collector = FakeCollector([], fail=True)
+    collector.retry_count = 2
+
+    with pytest.raises(CollectorError):
+        asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_FAILED, limit=10)
+    assert entries[0].context["retry_attempts"] == 2
+
+
+def test_ingest_from_collector_records_execution_id_and_inserted_signal_ids() -> None:
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = SignalService(signal_repo, audit_repo)
+    collector = FakeCollector([make_signal(), make_signal()])
+
+    stored = asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_COMPLETED, limit=10)
+    context = entries[0].context
+    assert "execution_id" in context
+    assert set(context["inserted_signal_ids"]) == {str(s.id) for s in stored}
+
+
 def test_ingest_from_collectors_runs_every_collector_and_persists_all_signals() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()

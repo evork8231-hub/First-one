@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from loguru import logger
 
@@ -15,6 +16,16 @@ from app.core.exceptions import CollectorError
 from app.domain.audit import AuditLogEntry
 from app.domain.enums import AuditEventType, VerificationStatus
 from app.domain.signal import Signal
+
+
+def _retry_attempts(collector: CollectorInterface) -> int:
+    """Read a collector's most-recent-run retry count, defaulting to 0 if untracked.
+
+    Not every hypothetical ``CollectorInterface`` implementation tracks
+    this (it lives on the concrete ``BaseCollector``, not the abstract
+    interface), so 0 here is an honest "no known retries," never a guess.
+    """
+    return int(getattr(collector, "retry_count", 0))
 
 
 @dataclass(frozen=True)
@@ -74,6 +85,7 @@ class SignalService:
                     context={
                         "collector": collector.name,
                         "duration_seconds": duration_seconds,
+                        "retry_attempts": _retry_attempts(collector),
                         **exc.details,
                     },
                 )
@@ -82,6 +94,7 @@ class SignalService:
 
         stored = self._signal_repository.add_many(signals)
         duration_seconds = round(time.monotonic() - start, 3)
+        execution_id = uuid4()
         for stored_signal in stored:
             self._audit_log_repository.add(
                 AuditLogEntry(
@@ -105,6 +118,9 @@ class SignalService:
                     "collector": collector.name,
                     "signal_count": len(stored),
                     "duration_seconds": duration_seconds,
+                    "retry_attempts": _retry_attempts(collector),
+                    "execution_id": str(execution_id),
+                    "inserted_signal_ids": [str(signal.id) for signal in stored],
                 },
             )
         )

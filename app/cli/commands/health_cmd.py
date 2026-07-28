@@ -50,6 +50,7 @@ def health(
     table.add_column("Last run (UTC)")
     table.add_column("Duration (s)", justify="right")
     table.add_column("Items", justify="right")
+    table.add_column("Retries", justify="right")
     table.add_column("Consecutive failures", justify="right")
 
     for report in reports:
@@ -60,6 +61,7 @@ def health(
             report.last_run_at.strftime("%Y-%m-%d %H:%M:%S"),
             "-" if report.last_duration_seconds is None else f"{report.last_duration_seconds:.3f}",
             "-" if report.last_item_count is None else str(report.last_item_count),
+            "-" if report.last_retry_attempts is None else str(report.last_retry_attempts),
             str(report.consecutive_failures),
         )
     console.print(table)

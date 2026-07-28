@@ -10,6 +10,7 @@ reported, with a full audit trail.
 from __future__ import annotations
 
 import time
+from uuid import uuid4
 
 from loguru import logger
 
@@ -19,6 +20,11 @@ from app.core.exceptions import CollectorError
 from app.domain.audit import AuditLogEntry
 from app.domain.enums import AuditEventType
 from app.domain.weather import WeatherEvent
+
+
+def _retry_attempts(collector: WeatherCollectorInterface) -> int:
+    """Read a collector's most-recent-run retry count, defaulting to 0 if untracked."""
+    return int(getattr(collector, "retry_count", 0))
 
 
 class WeatherEventService:
@@ -66,6 +72,7 @@ class WeatherEventService:
                     context={
                         "collector": collector.name,
                         "duration_seconds": duration_seconds,
+                        "retry_attempts": _retry_attempts(collector),
                         **exc.details,
                     },
                 )
@@ -74,6 +81,7 @@ class WeatherEventService:
 
         stored = self._weather_event_repository.add_many(events)
         duration_seconds = round(time.monotonic() - start, 3)
+        execution_id = uuid4()
 
         self._audit_log_repository.add(
             AuditLogEntry(
@@ -84,6 +92,9 @@ class WeatherEventService:
                     "collector": collector.name,
                     "event_count": len(stored),
                     "duration_seconds": duration_seconds,
+                    "retry_attempts": _retry_attempts(collector),
+                    "execution_id": str(execution_id),
+                    "inserted_event_ids": [str(event.id) for event in stored],
                 },
             )
         )

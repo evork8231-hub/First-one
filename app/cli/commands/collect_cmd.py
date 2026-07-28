@@ -1,4 +1,12 @@
-"""``sigint collect`` -- run one or every enabled collector."""
+"""``sigint collect`` -- run one or every enabled collector.
+
+``--all`` only actually executes an enabled collector that has passed
+``sigint verify-collector`` (see
+``app.cli.collector_verification_gate.split_by_verification``); an
+enabled-but-unverified collector is reported as a skipped failure rather
+than run. ``--collector <name>`` (a single, explicit, operator-named run)
+is not gated -- see ``collector_verification_gate`` for why.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +21,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from app.application.interfaces.weather_collector import WeatherCollectorInterface
 from app.application.services.signal_service import CollectorRunResult
+from app.cli.collector_verification_gate import not_verified_message, split_by_verification
+from app.cli.schema_drift_support import check_schema_drift_safely
 from app.core.container import Container
 from app.core.exceptions import CollectorError, ConfigurationError
 from app.domain.signal import Signal
@@ -87,10 +97,10 @@ def _warn_on_schema_drift(
     container: Container, collector_name: str, signals: Sequence[Signal]
 ) -> None:
     """Non-blocking: report (but never fail on) a collector's source structure changing."""
-    drift = container.schema_drift_detector().check(
-        collector_name, [signal.raw_payload for signal in signals]
+    drift = check_schema_drift_safely(
+        container, collector_name, [signal.raw_payload for signal in signals]
     )
-    if drift.has_drift:
+    if drift is not None and drift.has_drift:
         console.print(
             f"[yellow]Schema drift detected for {collector_name!r}: "
             f"{len(drift.added_keys)} key(s) added, {len(drift.removed_keys)} key(s) removed "
@@ -101,14 +111,20 @@ def _warn_on_schema_drift(
 def _collect_all(container: Container) -> None:
     settings = container.settings()
     enabled = settings.collectors.enabled_set
-    collectors = container.collector_registry().list_enabled(enabled)
-    weather_collectors = container.weather_collector_registry().list_enabled(enabled)
-    if not collectors and not weather_collectors:
+    all_collectors = container.collector_registry().list_enabled(enabled)
+    all_weather_collectors = container.weather_collector_registry().list_enabled(enabled)
+    if not all_collectors and not all_weather_collectors:
         console.print(
             "[yellow]No collectors are enabled -- set 'collectors.enabled' in configuration "
             "before running 'sigint collect --all'.[/yellow]"
         )
         raise typer.Exit(code=1)
+
+    lifecycle = container.collector_lifecycle_service()
+    collectors, unverified_collectors = split_by_verification(lifecycle, all_collectors)
+    weather_collectors, unverified_weather_collectors = split_by_verification(
+        lifecycle, all_weather_collectors
+    )
 
     service = container.signal_service()
     max_concurrency = settings.concurrency.max_concurrent_collectors
@@ -130,9 +146,15 @@ def _collect_all(container: Container) -> None:
             if collectors
             else []
         )
+        results.extend(
+            CollectorRunResult(collector_name=c.name, error=not_verified_message(c.name))
+            for c in unverified_collectors
+        )
         weather_event_counts, weather_errors = _run_weather_collectors(
             container, weather_collectors
         )
+        for c in unverified_weather_collectors:
+            weather_errors[c.name] = not_verified_message(c.name)
 
     succeeded = [r for r in results if r.succeeded]
     failed = [r for r in results if not r.succeeded]
@@ -148,17 +170,17 @@ def _collect_all(container: Container) -> None:
     for result in failed:
         console.print(f"  [red]- {result.collector_name}: {result.error}[/red]")
 
-    if weather_collectors:
+    if all_weather_collectors:
         total_events = sum(weather_event_counts.values())
         console.print(
-            f"Ran {len(weather_collectors)} weather collector(s): "
+            f"Ran {len(all_weather_collectors)} weather collector(s): "
             f"{total_events} event(s) ingested, [red]{len(weather_errors)} failed[/red]."
         )
         for name, error in weather_errors.items():
             console.print(f"  [red]- {name}: {error}[/red]")
 
     any_succeeded = bool(succeeded) or bool(weather_event_counts)
-    any_ran = bool(results) or bool(weather_collectors)
+    any_ran = bool(results) or bool(all_weather_collectors)
     if any_ran and not any_succeeded:
         raise typer.Exit(code=1)
 

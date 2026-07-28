@@ -81,6 +81,7 @@ class EhitisregisterCollector(BaseCollector):
         async with HttpClient(self._config, retry_policy=self._retry_policy) as client:
             resource_url = await self._discover_resource_url(client)
             payload = await client.get_json(resource_url)
+            self.retry_count = client.retry_count
 
         records = self._extract_records(payload)
         signals: list[Signal] = []
@@ -115,6 +116,7 @@ class EhitisregisterCollector(BaseCollector):
         async with HttpClient(self._config, retry_policy=self._retry_policy) as client:
             resource_url = await self._discover_resource_url(client)
             payload = await client.get_json(resource_url)
+            self.retry_count = client.retry_count
         return self._extract_records(payload)[:limit]
 
     async def _discover_resource_url(self, client: HttpClient) -> str:

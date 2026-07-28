@@ -95,3 +95,11 @@ class InMemorySignalRepository(SignalRepository):
             for sid in matching_ids:
                 del self._signals[sid]
         return len(matching_ids)
+
+    def delete_by_ids(self, signal_ids: Sequence[UUID]) -> int:
+        deleted = 0
+        for sid in signal_ids:
+            if sid in self._signals:
+                del self._signals[sid]
+                deleted += 1
+        return deleted

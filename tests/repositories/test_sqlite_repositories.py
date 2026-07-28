@@ -101,6 +101,26 @@ def test_signal_repository_delete_by_source_no_match_returns_zero(sqlite_session
     assert repo.count() == 1
 
 
+def test_signal_repository_delete_by_ids_deletes_only_the_given_ids(sqlite_session_factory) -> None:
+    repo = SQLiteSignalRepository(sqlite_session_factory)
+    to_delete = repo.add(make_signal(source="ehitisregister"))
+    kept = repo.add(make_signal(source="ehitisregister"))
+
+    deleted = repo.delete_by_ids([to_delete.id])
+
+    assert deleted == 1
+    assert repo.get_by_id(to_delete.id) is None
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_signal_repository_delete_by_ids_empty_list_returns_zero(sqlite_session_factory) -> None:
+    repo = SQLiteSignalRepository(sqlite_session_factory)
+    repo.add(make_signal(source="ehitisregister"))
+
+    assert repo.delete_by_ids([]) == 0
+    assert repo.count() == 1
+
+
 def test_lead_repository_crud_roundtrip(sqlite_session_factory) -> None:
     repo = SQLiteLeadRepository(sqlite_session_factory)
     lead = repo.add(make_lead())
@@ -177,6 +197,28 @@ def test_weather_repository_delete_by_source_respects_before(sqlite_session_fact
     assert deleted == 1
     assert repo.get_by_id(old.id) is None
     assert repo.get_by_id(recent.id) is not None
+
+
+def test_weather_repository_delete_by_ids_deletes_only_the_given_ids(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteWeatherEventRepository(sqlite_session_factory)
+    to_delete = repo.add(make_weather_event(source="ilmateenistus"))
+    kept = repo.add(make_weather_event(source="ilmateenistus"))
+
+    deleted = repo.delete_by_ids([to_delete.id])
+
+    assert deleted == 1
+    assert repo.get_by_id(to_delete.id) is None
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_weather_repository_delete_by_ids_empty_list_returns_zero(sqlite_session_factory) -> None:
+    repo = SQLiteWeatherEventRepository(sqlite_session_factory)
+    repo.add(make_weather_event(source="ilmateenistus"))
+
+    assert repo.delete_by_ids([]) == 0
+    assert repo.count() == 1
 
 
 def test_audit_log_repository_roundtrip(sqlite_session_factory) -> None:

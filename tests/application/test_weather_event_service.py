@@ -60,3 +60,42 @@ def test_ingest_from_collector_failure_is_audit_logged_and_reraised() -> None:
 
     event_types = [entry.event_type for entry in audit_repo.list_all(limit=10)]
     assert AuditEventType.COLLECTOR_RUN_FAILED in event_types
+
+
+def test_ingest_from_collector_surfaces_retry_attempts() -> None:
+    weather_repo = InMemoryWeatherEventRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = WeatherEventService(weather_repo, audit_repo)
+    collector = _FakeWeatherCollector([make_weather_event()])
+    collector.retry_count = 4  # type: ignore[attr-defined]
+
+    asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_COMPLETED, limit=10)
+    assert entries[0].context["retry_attempts"] == 4
+
+
+def test_ingest_from_collector_reports_zero_retries_when_untracked() -> None:
+    weather_repo = InMemoryWeatherEventRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = WeatherEventService(weather_repo, audit_repo)
+    collector = _FakeWeatherCollector([make_weather_event()])
+
+    asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_COMPLETED, limit=10)
+    assert entries[0].context["retry_attempts"] == 0
+
+
+def test_ingest_from_collector_records_execution_id_and_inserted_event_ids() -> None:
+    weather_repo = InMemoryWeatherEventRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    service = WeatherEventService(weather_repo, audit_repo)
+    collector = _FakeWeatherCollector([make_weather_event(), make_weather_event()])
+
+    stored = asyncio.run(service.ingest_from_collector(collector))
+
+    entries = audit_repo.list_all(event_type=AuditEventType.COLLECTOR_RUN_COMPLETED, limit=10)
+    context = entries[0].context
+    assert "execution_id" in context
+    assert set(context["inserted_event_ids"]) == {str(e.id) for e in stored}

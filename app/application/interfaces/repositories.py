@@ -86,6 +86,17 @@ class SignalRepository(ABC):
         confirming a real, destructive run.
         """
 
+    @abstractmethod
+    def delete_by_ids(self, signal_ids: Sequence[UUID]) -> int:
+        """Delete exactly the signals in ``signal_ids`` and return how many were deleted.
+
+        For rollback of a specific collector run (see
+        ``app.application.services.rollback_service.RollbackService``),
+        whose audit trail already recorded the exact ids it inserted --
+        unlike :meth:`delete_by_source`, this never needs to guess which
+        rows belong to a run.
+        """
+
 
 class LeadRepository(ABC):
     """Persistence boundary for Lead entities."""
@@ -167,6 +178,13 @@ class WeatherEventRepository(ABC):
         When ``dry_run`` is ``True``, nothing is deleted; the method only
         returns how many events *would* be deleted -- see
         ``SignalRepository.delete_by_source`` for the same contract.
+        """
+
+    @abstractmethod
+    def delete_by_ids(self, event_ids: Sequence[UUID]) -> int:
+        """Delete exactly the weather events in ``event_ids`` and return how many were deleted.
+
+        See ``SignalRepository.delete_by_ids`` for the same contract and rationale.
         """
 
 

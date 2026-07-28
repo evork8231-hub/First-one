@@ -13,6 +13,15 @@ collector belongs in ``collectors.enabled``, with an exit code matching
 the verdict (0 for READY, 1 for NOT READY/BLOCKED, 2 for a usage error).
 Never enables a collector, never edits configuration, and never invents
 a verdict beyond what the real run and sampled data show.
+
+Every verdict (except the permanently ``BLOCKED`` ehitisregister_xtee,
+which needs no lifecycle tracking) is recorded via
+``app.application.services.collector_lifecycle_service.CollectorLifecycleService``.
+``sigint collect --all`` and ``sigint pipeline`` read that record to
+refuse to actually run a collector that is listed in
+``collectors.enabled`` but was never verified READY here -- this command
+is what moves a collector from merely configured to safe to mass-collect
+from.
 """
 
 from __future__ import annotations
@@ -77,6 +86,7 @@ def verify_collector(
         )
         raise typer.Exit(code=2)
 
+    container.collector_lifecycle_service().record_verification_attempt(name, ready=ready)
     raise typer.Exit(code=0 if ready else 1)
 
 

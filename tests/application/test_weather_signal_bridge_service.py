@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from app.application.services.weather_signal_bridge_service import WeatherSignalBridgeService
 from app.config.settings import WeatherSignalBridgeConfig
 from app.domain.enums import AuditEventType, ServiceCategory, SignalType
 from app.domain.value_objects import Coordinates
 from app.repositories.in_memory.audit_log_repository import InMemoryAuditLogRepository
+from app.repositories.in_memory.configuration_repository import InMemoryConfigurationRepository
 from app.repositories.in_memory.signal_repository import InMemorySignalRepository
+from app.utils.time import utc_now
+from app.verification.weather_bridge_dedup import WeatherBridgeDeduplicator
 
 from tests.fixtures.factories import make_weather_event
 
@@ -17,8 +22,9 @@ def _service(
 ) -> tuple[WeatherSignalBridgeService, InMemorySignalRepository]:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
+    deduplicator = WeatherBridgeDeduplicator(InMemoryConfigurationRepository())
     config = WeatherSignalBridgeConfig(**config_overrides)  # type: ignore[arg-type]
-    return WeatherSignalBridgeService(signal_repo, audit_repo, config), signal_repo
+    return WeatherSignalBridgeService(signal_repo, audit_repo, config, deduplicator), signal_repo
 
 
 def test_bridge_with_no_events_returns_empty_and_touches_nothing() -> None:
@@ -99,9 +105,15 @@ def test_bridge_metadata_links_back_to_the_source_weather_event() -> None:
 def test_bridge_writes_one_audit_log_entry_per_event() -> None:
     signal_repo = InMemorySignalRepository()
     audit_repo = InMemoryAuditLogRepository()
-    service = WeatherSignalBridgeService(signal_repo, audit_repo, WeatherSignalBridgeConfig())
+    deduplicator = WeatherBridgeDeduplicator(InMemoryConfigurationRepository())
+    service = WeatherSignalBridgeService(
+        signal_repo, audit_repo, WeatherSignalBridgeConfig(), deduplicator
+    )
+    # Distinct counties (not just distinct auto-generated ids) so the two events are
+    # genuinely different real-world occurrences, never accidentally deduplicated.
+    events = [make_weather_event(), make_weather_event(county="Pärnu", municipality="Pärnu")]
 
-    service.bridge([make_weather_event(), make_weather_event()])
+    service.bridge(events)
 
     entries = audit_repo.list_all(event_type=AuditEventType.SIGNAL_INGESTED, limit=10)
     assert len(entries) == 2
@@ -117,3 +129,51 @@ def test_bridge_multiple_events_produces_multiple_independent_signals() -> None:
     assert len(stored) == 2
     assert signal_repo.count() == 2
     assert {s.county for s in stored} == {"Harju", "Pärnu"}
+
+
+def test_bridge_skips_the_same_real_event_re_collected_on_a_later_run() -> None:
+    """Two separate collector runs reporting the identical occurrence must not double-bridge."""
+    service, signal_repo = _service()
+    started = utc_now() - timedelta(days=1)
+    ended = started + timedelta(hours=3)
+    first_collection = make_weather_event(started_at=started, ended_at=ended)
+    second_collection = make_weather_event(started_at=started, ended_at=ended)
+    assert first_collection.id != second_collection.id  # distinct rows, same real event
+
+    first_stored = service.bridge([first_collection])
+    second_stored = service.bridge([second_collection])
+
+    assert len(first_stored) == 1
+    assert second_stored == []  # skipped as a duplicate, not re-bridged
+    assert signal_repo.count() == 1
+
+
+def test_bridge_skips_a_duplicate_within_the_same_batch() -> None:
+    """If a source ever reports the same event twice in one run, only one Signal is created."""
+    service, signal_repo = _service()
+    started = utc_now() - timedelta(days=1)
+    ended = started + timedelta(hours=3)
+    event_a = make_weather_event(started_at=started, ended_at=ended)
+    event_b = make_weather_event(started_at=started, ended_at=ended)
+
+    stored = service.bridge([event_a, event_b])
+
+    assert len(stored) == 1
+    assert signal_repo.count() == 1
+
+
+def test_bridge_does_not_write_an_audit_entry_for_a_skipped_duplicate() -> None:
+    signal_repo = InMemorySignalRepository()
+    audit_repo = InMemoryAuditLogRepository()
+    deduplicator = WeatherBridgeDeduplicator(InMemoryConfigurationRepository())
+    service = WeatherSignalBridgeService(
+        signal_repo, audit_repo, WeatherSignalBridgeConfig(), deduplicator
+    )
+    started = utc_now() - timedelta(days=1)
+    ended = started + timedelta(hours=3)
+
+    service.bridge([make_weather_event(started_at=started, ended_at=ended)])
+    service.bridge([make_weather_event(started_at=started, ended_at=ended)])
+
+    entries = audit_repo.list_all(event_type=AuditEventType.SIGNAL_INGESTED, limit=10)
+    assert len(entries) == 1

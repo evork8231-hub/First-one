@@ -78,3 +78,14 @@ class SQLiteWeatherEventRepository(WeatherEventRepository):
             if not dry_run and matching:
                 session.execute(delete(WeatherEventModel).where(*filters))
             return matching
+
+    def delete_by_ids(self, event_ids: Sequence[UUID]) -> int:
+        if not event_ids:
+            return 0
+        with session_scope(self._session_factory) as session:
+            filters = [WeatherEventModel.id.in_(event_ids)]
+            count_stmt = select(func.count()).select_from(WeatherEventModel).where(*filters)
+            matching = session.scalar(count_stmt) or 0
+            if matching:
+                session.execute(delete(WeatherEventModel).where(*filters))
+            return matching

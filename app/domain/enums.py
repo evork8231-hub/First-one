@@ -91,6 +91,7 @@ class AuditEventType(StrEnum):
     COLLECTOR_RUN_STARTED = "collector_run_started"
     COLLECTOR_RUN_COMPLETED = "collector_run_completed"
     COLLECTOR_RUN_FAILED = "collector_run_failed"
+    COLLECTOR_RUN_ROLLED_BACK = "collector_run_rolled_back"
     SIGNAL_INGESTED = "signal_ingested"
     SIGNAL_VERIFIED = "signal_verified"
     SIGNAL_REJECTED = "signal_rejected"
@@ -103,3 +104,21 @@ class AuditEventType(StrEnum):
     DATA_PURGED = "data_purged"
     SCHEMA_DRIFT_DETECTED = "schema_drift_detected"
     ERROR = "error"
+
+
+class CollectorLifecycleState(StrEnum):
+    """Progression a collector passes through before it may run via mass collection.
+
+    Recorded by
+    ``app.application.services.collector_lifecycle_service.CollectorLifecycleService``
+    on every ``sigint verify-collector`` run. ``sigint collect --all`` and
+    ``sigint pipeline`` read it to refuse to actually execute a collector
+    that is listed in ``collectors.enabled`` but was never verified --
+    see ``CollectorLifecycleService`` for why ``ENABLED`` is never
+    persisted here.
+    """
+
+    DISCOVERED = "discovered"
+    TESTED = "tested"
+    VERIFIED = "verified"
+    ENABLED = "enabled"

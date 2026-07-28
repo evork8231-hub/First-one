@@ -37,6 +37,10 @@ class BaseWeatherCollector(WeatherCollectorInterface):
         self._name = name
         self._source = source
         self._retry_policy = retry_policy or RetryPolicy()
+        #: Retry attempts made during this collector's most recent run --
+        #: see ``app.collectors.base.BaseCollector.retry_count`` for the
+        #: full contract, mirrored here.
+        self.retry_count = 0
 
     @property
     def name(self) -> str:
@@ -54,13 +58,18 @@ class BaseWeatherCollector(WeatherCollectorInterface):
                 translated from ``RetryExhaustedError`` so ``collect()``
                 always fails with a ``CollectorError`` subclass.
         """
+
+        def _on_retry(attempt: int, exc: BaseException) -> None:
+            self.retry_count += 1
+            logger.warning(
+                "Collector {} retrying (attempt {}) after error: {}", self._name, attempt, exc
+            )
+
         try:
             return await retry_async(
                 operation,
                 policy=self._retry_policy,
-                on_retry=lambda attempt, exc: logger.warning(
-                    "Collector {} retrying (attempt {}) after error: {}", self._name, attempt, exc
-                ),
+                on_retry=_on_retry,
             )
         except RetryExhaustedError as exc:
             raise CollectorUnavailableError(

@@ -53,6 +53,10 @@ class HttpClient:
         self._cache: TTLCache[tuple[str, str, tuple[tuple[str, Any], ...]], Any] | None = (
             TTLCache(ttl_seconds=config.cache_ttl_seconds) if config.cache_enabled else None
         )
+        #: Total retry attempts made across every request through this client
+        #: instance (a fresh instance is constructed per collector run, so this
+        #: naturally resets each run -- see app.collectors.base.BaseCollector).
+        self.retry_count = 0
 
     async def __aenter__(self) -> Self:
         self._client = httpx.AsyncClient(
@@ -146,14 +150,16 @@ class HttpClient:
                 raise CollectorError(f"{url!r} returned client error {response.status_code}.")
             return response
 
+        def _on_retry(attempt: int, exc: BaseException) -> None:
+            self.retry_count += 1
+            logger.warning("Retrying GET {} (attempt {}) after error: {}", url, attempt, exc)
+
         try:
             return await retry_async(
                 _do_request,
                 policy=self._retry_policy,
                 retry_on=_RETRYABLE_EXCEPTIONS,
-                on_retry=lambda attempt, exc: logger.warning(
-                    "Retrying GET {} (attempt {}) after error: {}", url, attempt, exc
-                ),
+                on_retry=_on_retry,
             )
         except RetryExhaustedError as exc:
             raise CollectorUnavailableError(

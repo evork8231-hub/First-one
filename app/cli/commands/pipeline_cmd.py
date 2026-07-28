@@ -23,6 +23,8 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from app.application.interfaces.rule_engine import RuleMatch
+from app.cli.collector_verification_gate import not_verified_message, split_by_verification
+from app.cli.schema_drift_support import check_schema_drift_safely
 from app.config.settings import AppSettings
 from app.core.container import Container
 from app.core.exceptions import CollectorError, ExportError
@@ -127,15 +129,30 @@ def pipeline(
 
 def _run_collect_stage(container: Container, settings: AppSettings, progress: Progress) -> None:
     enabled = settings.collectors.enabled_set
-    collectors = container.collector_registry().list_enabled(enabled)
-    weather_collectors = container.weather_collector_registry().list_enabled(enabled)
-    if not collectors and not weather_collectors:
+    all_collectors = container.collector_registry().list_enabled(enabled)
+    all_weather_collectors = container.weather_collector_registry().list_enabled(enabled)
+    if not all_collectors and not all_weather_collectors:
         logger.warning("Pipeline: no collectors enabled; skipping collection.")
         return
 
+    lifecycle = container.collector_lifecycle_service()
+    collectors, unverified_collectors = split_by_verification(lifecycle, all_collectors)
+    weather_collectors, unverified_weather_collectors = split_by_verification(
+        lifecycle, all_weather_collectors
+    )
+    for unverified_names in (
+        [c.name for c in unverified_collectors],
+        [c.name for c in unverified_weather_collectors],
+    ):
+        for name in unverified_names:
+            logger.warning(
+                "Pipeline collect stage: skipping collector {}: {}",
+                name,
+                not_verified_message(name),
+            )
+
     task = progress.add_task("Collecting signals...", total=None)
     if collectors:
-        drift_detector = container.schema_drift_detector()
         signal_service = container.signal_service()
         results = asyncio.run(
             signal_service.ingest_from_collectors(
@@ -153,10 +170,10 @@ def _run_collect_stage(container: Container, settings: AppSettings, progress: Pr
         for result in results:
             if not result.succeeded:
                 continue
-            drift = drift_detector.check(
-                result.collector_name, [signal.raw_payload for signal in result.signals]
+            drift = check_schema_drift_safely(
+                container, result.collector_name, [signal.raw_payload for signal in result.signals]
             )
-            if drift.has_drift:
+            if drift is not None and drift.has_drift:
                 logger.warning(
                     "Pipeline collect stage: schema drift detected for collector {}: "
                     "{} key(s) added, {} key(s) removed since the last run.",

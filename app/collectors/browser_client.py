@@ -46,6 +46,10 @@ class BrowserClient:
         self._rate_limiter = RateLimiter(config.request_delay_seconds)
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
+        #: Total retry attempts made across every navigation through this
+        #: client instance (a fresh instance is constructed per collector
+        #: run, so this naturally resets each run).
+        self.retry_count = 0
 
     async def __aenter__(self) -> Self:
         self._playwright = await async_playwright().start()
@@ -94,14 +98,18 @@ class BrowserClient:
             finally:
                 await page.close()
 
+        def _on_retry(attempt: int, exc: BaseException) -> None:
+            self.retry_count += 1
+            logger.warning(
+                "Retrying navigation to {} (attempt {}) after error: {}", url, attempt, exc
+            )
+
         try:
             return await retry_async(
                 _do_fetch,
                 policy=self._retry_policy,
                 retry_on=_RETRYABLE_EXCEPTIONS,
-                on_retry=lambda attempt, exc: logger.warning(
-                    "Retrying navigation to {} (attempt {}) after error: {}", url, attempt, exc
-                ),
+                on_retry=_on_retry,
             )
         except RetryExhaustedError as exc:
             raise CollectorUnavailableError(

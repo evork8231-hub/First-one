@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 from app.core.exceptions import EntityNotFoundError
@@ -120,6 +121,26 @@ def test_signal_repository_delete_by_source_no_match_returns_zero() -> None:
     assert repo.count() == 1
 
 
+def test_signal_repository_delete_by_ids_deletes_only_the_given_ids() -> None:
+    repo = InMemorySignalRepository()
+    to_delete = repo.add(make_signal(source="ehitisregister"))
+    kept = repo.add(make_signal(source="ehitisregister"))
+
+    deleted = repo.delete_by_ids([to_delete.id])
+
+    assert deleted == 1
+    assert repo.get_by_id(to_delete.id) is None
+    assert repo.get_by_id(kept.id) is not None
+
+
+def test_signal_repository_delete_by_ids_unknown_id_is_not_counted() -> None:
+    repo = InMemorySignalRepository()
+    kept = repo.add(make_signal(source="ehitisregister"))
+
+    assert repo.delete_by_ids([kept.id, uuid4()]) == 1
+    assert repo.count() == 0
+
+
 def test_lead_repository_crud_roundtrip() -> None:
     repo = InMemoryLeadRepository()
     lead = repo.add(make_lead())
@@ -205,6 +226,18 @@ def test_weather_repository_delete_by_source_respects_before() -> None:
     assert deleted == 1
     assert repo.get_by_id(old.id) is None
     assert repo.get_by_id(recent.id) is not None
+
+
+def test_weather_repository_delete_by_ids_deletes_only_the_given_ids() -> None:
+    repo = InMemoryWeatherEventRepository()
+    to_delete = repo.add(make_weather_event(source="ilmateenistus"))
+    kept = repo.add(make_weather_event(source="ilmateenistus"))
+
+    deleted = repo.delete_by_ids([to_delete.id])
+
+    assert deleted == 1
+    assert repo.get_by_id(to_delete.id) is None
+    assert repo.get_by_id(kept.id) is not None
 
 
 def test_audit_log_repository_add_and_list() -> None:

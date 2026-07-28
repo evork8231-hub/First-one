@@ -35,8 +35,21 @@ def test_get_health_reports_a_successful_run() -> None:
     assert report.last_item_count == 1
     assert report.last_duration_seconds is not None
     assert report.last_duration_seconds >= 0.0
+    assert report.last_retry_attempts == 0
     assert report.consecutive_failures == 0
     assert report.last_error is None
+
+
+def test_get_health_surfaces_retry_attempts() -> None:
+    audit_repo = InMemoryAuditLogRepository()
+    signal_service = SignalService(InMemorySignalRepository(), audit_repo)
+    collector = FakeCollector([make_signal()], name="ehitisregister")
+    collector.retry_count = 5
+
+    asyncio.run(signal_service.ingest_from_collector(collector))
+
+    [report] = CollectorHealthService(audit_repo).get_health()
+    assert report.last_retry_attempts == 5
 
 
 def test_get_health_reports_a_failed_run() -> None:

@@ -27,9 +27,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from app.collectors.browser_client import BrowserClient
 from app.collectors.selector_discovery import SelectorDiscoveryReport, analyze_html
-from app.config.settings import BrowserCollectorConfig
 from app.core.container import Container
 from app.core.exceptions import CollectorError
 
@@ -86,20 +84,15 @@ def discover_selectors(
     else:
         assert url is not None
         container: Container = ctx.obj
-        browser_config = getattr(container.settings().collectors, collector)
+        listing_collector = getattr(container, f"{collector}_collector")()
         try:
-            html = asyncio.run(_fetch(browser_config, url))
+            html = asyncio.run(listing_collector.fetch_page_html(url))
         except CollectorError as exc:
             console.print(f"[red]Could not fetch {url!r}: {exc.message}[/red]")
             raise typer.Exit(code=1) from exc
 
     report = analyze_html(html, min_repeat_count=min_repeat_count)
     _print_report(report)
-
-
-async def _fetch(browser_config: BrowserCollectorConfig, url: str) -> str:
-    async with BrowserClient(browser_config) as browser:
-        return await browser.fetch_rendered_html(url)
 
 
 def _print_report(report: SelectorDiscoveryReport) -> None:
@@ -134,6 +127,8 @@ def _print_report(report: SelectorDiscoveryReport) -> None:
 
     console.print(f"Price-like text samples: {report.price_text_samples or '(none found)'}")
     console.print(f"Postal-code-like samples: {report.postal_code_samples or '(none found)'}")
+    console.print(f"Street address samples: {report.street_address_samples or '(none found)'}")
+    console.print(f"Known city names found: {report.city_name_samples or '(none found)'}")
     console.print(
         "[yellow]These are candidates only -- nothing has been changed.[/yellow] Review "
         "them against the real page and, if correct, set listing_link_selector "

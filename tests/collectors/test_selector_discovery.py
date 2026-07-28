@@ -99,6 +99,46 @@ def test_analyze_html_detects_postal_code_samples() -> None:
     assert "51010" in report.postal_code_samples
 
 
+def test_analyze_html_detects_street_address_samples() -> None:
+    report = analyze_html(_LISTING_PAGE_HTML)
+    assert "Tartu mnt 5" in report.street_address_samples
+    assert "Ranna tee 1" in report.street_address_samples
+
+
+def test_analyze_html_does_not_flag_a_street_name_with_no_suffix_as_an_address() -> None:
+    """'Riia 20' has no recognized street suffix -- must not be guessed as an address."""
+    report = analyze_html(_LISTING_PAGE_HTML)
+    assert not any(sample.startswith("Riia") for sample in report.street_address_samples)
+
+
+def test_analyze_html_never_stitches_a_street_address_from_unrelated_page_fragments() -> None:
+    """A street-suffix word and a house number in unrelated parts of the page must not combine."""
+    html = (
+        "<html><body>"
+        "<p>Tänav is the Estonian word for street.</p>"
+        "<p>Unit price: 5 EUR per square meter.</p>"
+        "</body></html>"
+    )
+    report = analyze_html(html)
+    assert report.street_address_samples == []
+
+
+def test_analyze_html_detects_known_city_names() -> None:
+    report = analyze_html(_LISTING_PAGE_HTML)
+    assert set(report.city_name_samples) == {"Tallinn", "Tartu", "Pärnu"}
+
+
+def test_analyze_html_reports_no_city_names_when_none_present() -> None:
+    report = analyze_html("<html><body><div>Nothing relevant here.</div></body></html>")
+    assert report.city_name_samples == []
+
+
+def test_analyze_html_never_fabricates_a_city_name_not_literally_in_the_page() -> None:
+    """Narva never appears in the fixture page and must never be reported."""
+    report = analyze_html(_LISTING_PAGE_HTML)
+    assert "Narva" not in report.city_name_samples
+
+
 def test_analyze_html_max_candidates_caps_results() -> None:
     cards = "".join(f'<div class="card-{i}">x</div><div class="card-{i}">y</div>' for i in range(5))
     html = f"<html><body>{cards}</body></html>"

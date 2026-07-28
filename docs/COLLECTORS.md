@@ -173,6 +173,36 @@ and `app.application.services.weather_event_service.WeatherEventService`).
 `sigint pipeline` runs the same collection step as its first stage unless
 `--skip-collect` is given.
 
+## Collector lifecycle: DISCOVERED -> TESTED -> VERIFIED -> ENABLED
+
+A collector registered in the DI container starts `DISCOVERED`. Running
+`sigint verify-collector <name>` moves it to `TESTED` (attempted, but the
+verdict was NOT READY) or `VERIFIED` (verdict was READY) --
+`app.application.services.collector_lifecycle_service.CollectorLifecycleService`
+records this via `ConfigurationRepository`, the same way schema-drift
+fingerprints and weather-bridge dedup keys are stored. `ENABLED` is never
+written by that service: it is a derived fact (listed in
+`collectors.enabled` *and* currently `VERIFIED`), never something the
+service grants on its own.
+
+Both `sigint collect --all` and `sigint pipeline` read this state and
+**refuse to actually run** a collector that is listed in
+`collectors.enabled` but was never verified READY -- it is reported as a
+skipped failure (`not verified for mass collection -- run
+'sigint verify-collector <name>' ...`) instead of being executed, so
+adding a name to `collectors.enabled` alone is never enough to make it
+run. `sigint collect --collector <name>` (an operator naming one
+collector to run right now, the same deliberate kind of action as
+`verify-collector` itself) is **not** gated -- gating it too would make
+it impossible to ever reach `VERIFIED` for the first time. A later failed
+re-verification moves a `VERIFIED` collector back down to `TESTED`,
+since only the most recent verification result is trusted.
+
+```bash
+sigint verify-collector ehitisregister   # -> VERIFIED if READY
+sigint collect --all                     # now actually runs ehitisregister
+```
+
 ## Schema drift detection
 
 `sigint collect`/`sigint pipeline` fingerprint every signal-producing
@@ -229,9 +259,12 @@ sigint discover-fields --sample-limit 5 --score-cutoff 60
 Analyzes a downloaded (or live-fetched) listing/search-results page and
 reports repeated tag+class element groups that look like listing cards,
 anchor groups that look like `listing_link_selector` candidates, and
-price-like/postal-code-like text samples -- each with an occurrence count
-and a sample, for an operator to compare against the real page.
-See `app.collectors.selector_discovery`.
+address-related text samples (price-like text, postal codes, street
+name + house number pairs matched together as one literal substring --
+never a name and a number stitched together from separate parts of the
+page -- and known Estonian city names found verbatim in the page) --
+each with an occurrence count and a sample, for an operator to compare
+against the real page. See `app.collectors.selector_discovery`.
 
 ```bash
 sigint discover-selectors --html-file search_results.html
@@ -298,4 +331,28 @@ signals across several sources, so it has no single `source` to purge by.
 sigint purge signals --source "Ehitisregister (Estonian Building Registry)"        # preview
 sigint purge signals --source "Ehitisregister (Estonian Building Registry)" --yes  # delete
 sigint purge weather-events --source "Ilmateenistus (Estonian Environment Agency Weather Service)" --before 2026-01-01 --yes
+```
+
+### `sigint rollback` -- undo the last collector run
+
+Undoes the most recent successful run of a single collector (identified
+by its config name, e.g. `ehitisregister`, `ilmateenistus`), via
+`app.application.services.rollback_service.RollbackService`. Unlike
+`sigint purge`, it never has to guess which rows to delete: every
+`COLLECTOR_RUN_COMPLETED` audit entry already records the exact
+`execution_id` and the ids of every record that run inserted (written by
+`SignalService`/`WeatherEventService`), so a rollback deletes precisely
+those rows.
+
+Always a dry-run preview by default; pass `--yes` to actually roll back.
+A real rollback never edits or deletes the `COLLECTOR_RUN_COMPLETED`
+entry it reverses -- it appends a new `COLLECTOR_RUN_ROLLED_BACK` entry,
+so the audit history stays complete and the same run cannot be rolled
+back twice (a second `--yes` call reports that there is no un-rolled-back
+run left and exits non-zero).
+
+```bash
+sigint rollback signals ehitisregister              # preview
+sigint rollback signals ehitisregister --yes        # actually roll back
+sigint rollback weather-events ilmateenistus --yes
 ```

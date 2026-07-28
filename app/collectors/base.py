@@ -40,6 +40,15 @@ class BaseCollector(CollectorInterface):
         self._source = source
         self._supported_signal_types = supported_signal_types
         self._retry_policy = retry_policy or RetryPolicy()
+        #: Retry attempts made during this collector's most recent run.
+        #: Concrete collectors that delegate to HttpClient/BrowserClient
+        #: copy that client's own ``retry_count`` here after use (see
+        #: e.g. ``EhitisregisterCollector.collect``); collectors using
+        #: :meth:`_with_retry` directly get it tracked automatically.
+        #: Reset to 0 at the start of each ``collect()`` call by
+        #: convention, not automatically, since only the collector knows
+        #: when a new run begins.
+        self.retry_count = 0
 
     @property
     def name(self) -> str:
@@ -63,13 +72,18 @@ class BaseCollector(CollectorInterface):
                 with a ``CollectorError`` subclass, per the
                 ``CollectorInterface`` contract.
         """
+
+        def _on_retry(attempt: int, exc: BaseException) -> None:
+            self.retry_count += 1
+            logger.warning(
+                "Collector {} retrying (attempt {}) after error: {}", self._name, attempt, exc
+            )
+
         try:
             return await retry_async(
                 operation,
                 policy=self._retry_policy,
-                on_retry=lambda attempt, exc: logger.warning(
-                    "Collector {} retrying (attempt {}) after error: {}", self._name, attempt, exc
-                ),
+                on_retry=_on_retry,
             )
         except RetryExhaustedError as exc:
             raise CollectorUnavailableError(
