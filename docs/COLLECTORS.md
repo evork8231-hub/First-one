@@ -351,6 +351,34 @@ so the audit history stays complete and the same run cannot be rolled
 back twice (a second `--yes` call reports that there is no un-rolled-back
 run left and exits non-zero).
 
+**Atomic.** Deleting the records and writing the rollback's audit entry
+happen inside a single database transaction
+(`app.application.interfaces.rollback_unit_of_work.RollbackUnitOfWork`,
+implemented by `SQLiteRollbackUnitOfWork`) -- a crash, disk-full, or lock
+timeout between the two can never leave records deleted with no audit
+trail of it; the whole operation either commits or is fully rolled back.
+
+**Race-safe.** The same transaction re-checks, immediately before
+committing and after it has already taken SQLite's write lock, whether
+another process rolled back this exact run first. Two concurrent
+`sigint rollback --yes` invocations on the same run can never both
+succeed -- the loser gets a clear "already rolled back by another
+process" error instead of writing a duplicate audit entry.
+
+**Metadata is validated, never trusted.** A malformed `execution_id` or a
+non-UUID entry in `inserted_signal_ids`/`inserted_event_ids` (corrupted
+by a hand edit, a bug, or a future schema change) is caught and reported
+as a clean error ("Rollback metadata ... is corrupted ... Rollback cannot
+continue safely.") -- never an uncaught Python traceback, and nothing is
+deleted.
+
+**Refuses to orphan a Lead.** If a Signal a rollback would delete is
+still cited by an existing Lead's `supporting_signal_ids`, the rollback
+is blocked with a clear error rather than deleting the Signal (which
+would leave the Lead pointing at a record that no longer exists) or
+silently rewriting the Lead. Resolve or reject the Lead first, then
+retry.
+
 ```bash
 sigint rollback signals ehitisregister              # preview
 sigint rollback signals ehitisregister --yes        # actually roll back

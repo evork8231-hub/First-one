@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.interfaces.repositories import AuditLogRepository
@@ -41,5 +41,17 @@ class SQLiteAuditLogRepository(AuditLogRepository):
                 stmt = stmt.where(AuditLogModel.event_type == event_type)
             if entity_id is not None:
                 stmt = stmt.where(AuditLogModel.entity_id == entity_id)
-            stmt = stmt.order_by(AuditLogModel.created_at.desc()).limit(limit).offset(offset)
+            # AuditLogModel.id is a random UUID, not a sortable tiebreaker, so
+            # "newest first" on created_at alone is not deterministic when two
+            # entries share a timestamp (a real possibility at microsecond
+            # clock resolution). SQLite maintains an implicit, monotonically
+            # increasing `rowid` for every rowid table (this one has no
+            # INTEGER PRIMARY KEY, so it keeps its own hidden rowid) that
+            # reflects true insertion order -- ordering by it as a secondary
+            # key makes "most recent" unambiguous without a schema change.
+            stmt = (
+                stmt.order_by(AuditLogModel.created_at.desc(), text("audit_logs.rowid DESC"))
+                .limit(limit)
+                .offset(offset)
+            )
             return [model.to_domain() for model in session.scalars(stmt)]

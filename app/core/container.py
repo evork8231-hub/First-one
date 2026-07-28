@@ -56,6 +56,7 @@ from app.logging.setup import configure_logging
 from app.repositories.sqlite.audit_log_repository import SQLiteAuditLogRepository
 from app.repositories.sqlite.configuration_repository import SQLiteConfigurationRepository
 from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
+from app.repositories.sqlite.rollback_unit_of_work import SQLiteRollbackUnitOfWork
 from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
 from app.repositories.sqlite.weather_repository import SQLiteWeatherEventRepository
 from app.rule_engine.engine import RuleEngine
@@ -107,6 +108,9 @@ class Container(containers.DeclarativeContainer):
     )
     configuration_repository = providers.Singleton(
         SQLiteConfigurationRepository, session_factory=session_factory
+    )
+    rollback_unit_of_work = providers.Singleton(
+        SQLiteRollbackUnitOfWork, session_factory=session_factory
     )
 
     # --- Collectors --------------------------------------------------------
@@ -246,9 +250,9 @@ class Container(containers.DeclarativeContainer):
     )
     rollback_service = providers.Factory(
         RollbackService,
-        signal_repository=signal_repository,
-        weather_event_repository=weather_event_repository,
         audit_log_repository=audit_log_repository,
+        lead_repository=lead_repository,
+        rollback_unit_of_work=rollback_unit_of_work,
     )
     collector_lifecycle_service = providers.Factory(
         CollectorLifecycleService, configuration_repository=configuration_repository

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 from app.core.exceptions import EntityNotFoundError
@@ -140,6 +141,38 @@ def test_lead_repository_count_respects_filters(sqlite_session_factory) -> None:
 
     assert repo.count() == 2
     assert repo.count(verification_status=VerificationStatus.VERIFIED) == 1
+
+
+def test_lead_repository_list_referencing_signal_ids_finds_matching_leads(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    cited = uuid4()
+    uncited = uuid4()
+    matching = repo.add(make_lead(supporting_signal_ids=[cited, uuid4()]))
+    repo.add(make_lead(supporting_signal_ids=[uncited, uuid4()]))
+
+    found = repo.list_referencing_signal_ids([cited])
+
+    assert [lead.id for lead in found] == [matching.id]
+
+
+def test_lead_repository_list_referencing_signal_ids_empty_input_returns_empty(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    repo.add(make_lead())
+
+    assert repo.list_referencing_signal_ids([]) == []
+
+
+def test_lead_repository_list_referencing_signal_ids_no_match_returns_empty(
+    sqlite_session_factory,
+) -> None:
+    repo = SQLiteLeadRepository(sqlite_session_factory)
+    repo.add(make_lead())
+
+    assert repo.list_referencing_signal_ids([uuid4()]) == []
 
 
 def test_weather_repository_roundtrip(sqlite_session_factory) -> None:

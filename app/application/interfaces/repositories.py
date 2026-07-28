@@ -137,6 +137,17 @@ class LeadRepository(ABC):
     ) -> int:
         """Return how many leads match the given filters, without loading them."""
 
+    @abstractmethod
+    def list_referencing_signal_ids(self, signal_ids: Sequence[UUID]) -> list[Lead]:
+        """Return every Lead whose ``supporting_signal_ids`` cites any id in ``signal_ids``.
+
+        Used by ``app.application.services.rollback_service.RollbackService``
+        to refuse to roll back Signals a Lead still depends on -- deleting a
+        cited Signal would leave that Lead's ``supporting_signal_ids``
+        pointing at a record that no longer exists, and this repository has
+        no way to know whether the caller intends to handle that.
+        """
+
 
 class WeatherEventRepository(ABC):
     """Persistence boundary for WeatherEvent entities."""

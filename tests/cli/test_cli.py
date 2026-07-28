@@ -19,13 +19,15 @@ from app.domain.audit import AuditLogEntry
 from app.domain.enums import AuditEventType, SignalType
 from app.repositories.sqlite.audit_log_repository import SQLiteAuditLogRepository
 from app.repositories.sqlite.configuration_repository import SQLiteConfigurationRepository
+from app.repositories.sqlite.lead_repository import SQLiteLeadRepository
 from app.repositories.sqlite.signal_repository import SQLiteSignalRepository
 from app.repositories.sqlite.weather_repository import SQLiteWeatherEventRepository
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
-from tests.fixtures.factories import make_signal, make_weather_event
+from tests.fixtures.factories import make_lead, make_signal, make_weather_event
 
 runner = CliRunner()
 
@@ -1224,6 +1226,29 @@ def test_collect_all_weather_bridge_deduplicates_the_same_event_across_runs(
     assert len(weather_signals) == 1
 
 
+def test_rollback_survives_an_application_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every 'runner.invoke' below builds a brand new Container (see app.cli.main.main) --
+    exactly what happens on a real process restart. Rollback depends on nothing but what
+    was persisted to the database, so it must work identically across that boundary."""
+    db_path = tmp_path / "rollback.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])  # process 1: initialize
+    _patch_ehitisregister_http_client(monkeypatch, [{"maakond": "Harju", "omavalitsus": "Tallinn"}])
+    runner.invoke(app, ["collect", "--collector", "ehitisregister"])  # process 2: collect
+
+    # process 3, a fresh CLI invocation with no memory of the two above, "restarts" and
+    # rolls back what an earlier process inserted.
+    result = runner.invoke(app, ["rollback", "signals", "ehitisregister", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "Rolled back" in result.output
+    engine = create_engine(f"sqlite:///{db_path}")
+    session_factory = sessionmaker(bind=engine)
+    assert SQLiteSignalRepository(session_factory).count() == 0
+
+
 def test_rollback_signals_dry_run_previews_without_deleting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1324,3 +1349,82 @@ def test_rollback_weather_events_dry_run_then_yes(
     assert deletion.exit_code == 0, deletion.output
     assert "Rolled back" in deletion.output
     assert SQLiteWeatherEventRepository(session_factory).count() == 0
+
+
+def test_rollback_signals_reports_corrupted_metadata_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "rollback.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    session_factory = sessionmaker(bind=engine)
+    SQLiteAuditLogRepository(session_factory).add(
+        AuditLogEntry(
+            event_type=AuditEventType.COLLECTOR_RUN_COMPLETED,
+            entity_type="Collector",
+            message="Collector 'ehitisregister' produced 1 signal(s).",
+            context={
+                "collector": "ehitisregister",
+                "execution_id": "not-a-real-uuid",
+                "inserted_signal_ids": [],
+            },
+        )
+    )
+
+    result = runner.invoke(app, ["rollback", "signals", "ehitisregister", "--yes"])
+
+    assert result.exit_code == 1, result.output
+    assert "corrupted" in result.output
+    assert "Rollback cannot continue" in result.output
+    assert isinstance(
+        result.exception, SystemExit
+    ), "must exit cleanly, never crash with a raw traceback"
+
+
+def test_rollback_signals_blocked_when_a_lead_still_references_the_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "rollback.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+    _patch_ehitisregister_http_client(monkeypatch, [{"maakond": "Harju", "omavalitsus": "Tallinn"}])
+    runner.invoke(app, ["collect", "--collector", "ehitisregister"])
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    session_factory = sessionmaker(bind=engine)
+    signal_repo = SQLiteSignalRepository(session_factory)
+    [ingested_signal] = signal_repo.list_all(limit=10)
+    other_signal = signal_repo.add(make_signal(source="kv_ee"))
+    SQLiteLeadRepository(session_factory).add(
+        make_lead(supporting_signal_ids=[ingested_signal.id, other_signal.id])
+    )
+
+    result = runner.invoke(app, ["rollback", "signals", "ehitisregister", "--yes"])
+
+    assert result.exit_code == 1, result.output
+    assert "lead" in result.output.lower()
+    assert signal_repo.get_by_id(ingested_signal.id) is not None, "must not delete a cited signal"
+
+
+def test_rollback_signals_reports_a_database_error_without_a_raw_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "rollback.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    def _raise_operational_error(self, **kwargs: object) -> list[AuditLogEntry]:
+        raise OperationalError("simulated database is locked", None, Exception())
+
+    monkeypatch.setattr(SQLiteAuditLogRepository, "list_all", _raise_operational_error)
+
+    result = runner.invoke(app, ["rollback", "signals", "ehitisregister", "--yes"])
+
+    assert result.exit_code == 1, result.output
+    assert "Database error" in result.output
+    assert "Rollback did not complete" in result.output
+    assert isinstance(
+        result.exception, SystemExit
+    ), "must exit cleanly, never crash with a raw traceback"

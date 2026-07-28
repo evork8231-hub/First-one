@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -84,3 +85,21 @@ class SQLiteLeadRepository(LeadRepository):
             if municipality is not None:
                 stmt = stmt.where(LeadModel.municipality == municipality)
             return session.scalar(stmt) or 0
+
+    def list_referencing_signal_ids(self, signal_ids: Sequence[UUID]) -> list[Lead]:
+        if not signal_ids:
+            return []
+        wanted = {str(signal_id) for signal_id in signal_ids}
+        with session_scope(self._session_factory) as session:
+            stmt = select(LeadModel)
+            # supporting_signal_ids is a JSON list column (see LeadModel) with
+            # no per-element index -- Leads are a small, curated output (never
+            # a high-volume table like Signals), so an in-Python intersection
+            # over every stored Lead is simple, portable across SQLAlchemy
+            # dialects, and avoids depending on SQLite's JSON1 extension.
+            # Revisit with a real query if Lead volume ever makes this slow.
+            return [
+                model.to_domain()
+                for model in session.scalars(stmt)
+                if wanted.intersection(model.supporting_signal_ids)
+            ]

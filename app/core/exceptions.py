@@ -98,3 +98,42 @@ class RetryExhaustedError(AppError):
 
 class ExportError(AppError):
     """Raised when exporting leads or signals to an external format fails."""
+
+
+class RollbackError(AppError):
+    """Base class for errors that prevent a collector-run rollback from proceeding safely."""
+
+
+class CorruptedRollbackMetadataError(RollbackError):
+    """Raised when an audit entry's rollback metadata cannot be trusted.
+
+    Covers a malformed ``execution_id``, a non-list ``inserted_signal_ids``/
+    ``inserted_event_ids``, or an entry containing a value that does not
+    parse as a UUID. Rollback must never guess or coerce this data -- if it
+    cannot be parsed exactly as written, deletion must not proceed.
+    """
+
+
+class RollbackBlockedByDependentDataError(RollbackError):
+    """Raised when rollback would delete Signals still cited by an existing Lead.
+
+    Deleting a Signal that a Lead's ``supporting_signal_ids`` still
+    references would leave that Lead pointing at a record that no longer
+    exists. Rollback refuses rather than silently deleting the Signal or
+    silently rewriting the Lead -- see
+    ``app.application.services.rollback_service.RollbackService`` for the
+    full rationale.
+    """
+
+
+class RollbackConflictError(RollbackError):
+    """Raised when another process already rolled back this exact run.
+
+    Detected by a second, authoritative check made *after* this
+    transaction has taken SQLite's write lock (see
+    ``app.repositories.sqlite.rollback_unit_of_work.SQLiteRollbackUnitOfWork``),
+    so this can only fire on a genuine race between two concurrent
+    ``sigint rollback`` invocations -- never on an ordinary second run,
+    which is instead reported as ``EntityNotFoundError`` by
+    ``RollbackService`` before any transaction is opened.
+    """

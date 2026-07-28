@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from app.application.interfaces.repositories import LeadRepository
@@ -71,3 +72,11 @@ class InMemoryLeadRepository(LeadRepository):
         if municipality is not None:
             results = [lead for lead in results if lead.municipality == municipality]
         return len(results)
+
+    def list_referencing_signal_ids(self, signal_ids: Sequence[UUID]) -> list[Lead]:
+        wanted = set(signal_ids)
+        if not wanted:
+            return []
+        return [
+            lead for lead in self._leads.values() if wanted.intersection(lead.supporting_signal_ids)
+        ]

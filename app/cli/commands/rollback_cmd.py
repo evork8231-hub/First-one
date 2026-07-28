@@ -8,22 +8,45 @@ rollback never has to guess which rows belong to the run being reversed.
 
 Like ``sigint purge``, every subcommand previews its effect by default (a
 dry run: it reports what *would* be deleted) and only performs the actual
-deletion when ``--yes`` is passed. A rollback never edits or deletes the
-audit entries it reads -- it appends a new ``COLLECTOR_RUN_ROLLED_BACK``
-entry, so the audit history stays complete and the same run cannot be
-rolled back twice (see ``RollbackService`` for details).
+deletion when ``--yes`` is passed. A real rollback deletes the records and
+appends a new ``COLLECTOR_RUN_ROLLED_BACK`` entry as a single atomic
+operation (see ``app.application.interfaces.rollback_unit_of_work``) --
+it never edits or deletes the audit entries it reads, so the audit
+history stays complete and the same run cannot be rolled back twice.
+
+Every failure mode ``RollbackService`` can raise -- no matching run,
+corrupted rollback metadata, a Signal still cited by a Lead, or a race
+against a concurrent rollback -- is caught here and shown as a clean,
+specific message. A database-level failure (locked, unavailable, disk
+full) is also caught and reported clearly rather than dumping a raw
+traceback at the operator; the full exception is still logged for
+diagnosis, and the command still exits non-zero -- nothing here treats a
+failure as a success.
 """
 
 from __future__ import annotations
 
 import typer
+from loguru import logger
 from rich.console import Console
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.container import Container
-from app.core.exceptions import EntityNotFoundError
+from app.core.exceptions import EntityNotFoundError, RollbackError
 
 console = Console()
 app = typer.Typer(help="Preview or undo the last completed run of a collector (dry-run default).")
+
+
+def _report_database_error(collector: str, exc: SQLAlchemyError) -> None:
+    logger.opt(exception=exc).error(
+        "Rollback of collector {} failed with a database error", collector
+    )
+    console.print(
+        f"[red]Database error while rolling back {collector!r}: {exc}[/red]\n"
+        f"[red]Rollback did not complete. See logs for details and retry once the "
+        f"database is reachable.[/red]"
+    )
 
 
 @app.command("signals")
@@ -39,8 +62,11 @@ def rollback_signals(
     service = container.rollback_service()
     try:
         result = service.rollback_last_signal_run(collector, dry_run=not yes)
-    except EntityNotFoundError as exc:
+    except (EntityNotFoundError, RollbackError) as exc:
         console.print(f"[red]{exc.message}[/red]")
+        raise typer.Exit(code=1) from exc
+    except SQLAlchemyError as exc:
+        _report_database_error(collector, exc)
         raise typer.Exit(code=1) from exc
 
     if yes:
@@ -69,8 +95,11 @@ def rollback_weather_events(
     service = container.rollback_service()
     try:
         result = service.rollback_last_weather_run(collector, dry_run=not yes)
-    except EntityNotFoundError as exc:
+    except (EntityNotFoundError, RollbackError) as exc:
         console.print(f"[red]{exc.message}[/red]")
+        raise typer.Exit(code=1) from exc
+    except SQLAlchemyError as exc:
+        _report_database_error(collector, exc)
         raise typer.Exit(code=1) from exc
 
     if yes:

@@ -165,6 +165,25 @@ def test_lead_repository_count_respects_filters() -> None:
     assert repo.count(verification_status=VerificationStatus.VERIFIED) == 1
 
 
+def test_lead_repository_list_referencing_signal_ids_finds_matching_leads() -> None:
+    repo = InMemoryLeadRepository()
+    cited = uuid4()
+    uncited = uuid4()
+    matching = repo.add(make_lead(supporting_signal_ids=[cited, uuid4()]))
+    repo.add(make_lead(supporting_signal_ids=[uncited, uuid4()]))
+
+    found = repo.list_referencing_signal_ids([cited])
+
+    assert [lead.id for lead in found] == [matching.id]
+
+
+def test_lead_repository_list_referencing_signal_ids_empty_input_returns_empty() -> None:
+    repo = InMemoryLeadRepository()
+    repo.add(make_lead())
+
+    assert repo.list_referencing_signal_ids([]) == []
+
+
 def test_weather_repository_add_many_and_count() -> None:
     repo = InMemoryWeatherEventRepository()
     stored = repo.add_many([make_weather_event(), make_weather_event()])

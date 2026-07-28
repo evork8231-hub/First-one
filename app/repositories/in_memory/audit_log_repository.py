@@ -32,5 +32,13 @@ class InMemoryAuditLogRepository(AuditLogRepository):
             results = [entry for entry in results if entry.event_type == event_type]
         if entity_id is not None:
             results = [entry for entry in results if entry.entity_id == entity_id]
-        results.sort(key=lambda entry: entry.created_at, reverse=True)
-        return results[offset : offset + limit]
+        # Mirror SQLiteAuditLogRepository's "created_at DESC, rowid DESC"
+        # ordering: pair each entry with its append-order index so two
+        # entries sharing a timestamp still resolve deterministically to
+        # "most recently added first," matching the SQLite-backed behavior
+        # instead of relying on Python's stable-sort tiebreak (which would
+        # keep ties in their original, i.e. oldest-first, order here).
+        indexed = list(enumerate(results))
+        indexed.sort(key=lambda pair: (pair[1].created_at, pair[0]), reverse=True)
+        ordered = [entry for _, entry in indexed]
+        return ordered[offset : offset + limit]
