@@ -128,13 +128,19 @@ failed run surfaces in `systemctl status`/`journalctl` the normal way.
 
 There is no HTTP health endpoint (no web server ships). A reasonable
 external check is `sigint config validate` (confirms configuration is
-loadable) followed by `sigint stats` (confirms the database is reachable
-and queryable) -- both exit `0` on success and are cheap enough to run on
-a monitoring interval. `sigint health` goes one step further and reports
-each collector's last run status, duration, item count, and consecutive-
-failure streak (read from the audit log; triggers no collection itself)
--- a good addition to an operator dashboard or a scheduled alert on
-`consecutive_failures` crossing a threshold.
+loadable) followed by `sigint db check` (confirms the database is
+reachable and, for SQLite, structurally intact via `PRAGMA
+integrity_check`) and `sigint db migration-status` (confirms the schema is
+at head, listing any pending migrations by revision id otherwise) -- all
+three exit `0` on success and are cheap enough to run on a monitoring
+interval. `sigint health` goes one step further and reports each
+collector's last run status, duration, item count, and consecutive-failure
+streak (read from the audit log; triggers no collection itself) -- a good
+addition to an operator dashboard or a scheduled alert on
+`consecutive_failures` crossing a threshold. `sigint collector-status`
+reports each registered collector's verification lifecycle state
+(`discovered`/`tested`/`verified`) and whether it is currently enabled and
+actually running, independent of any recent collection activity.
 
 ## Removing data from a retired or misconfigured source
 
@@ -262,7 +268,11 @@ Leads.
 
 Before promoting a configuration or code change to production, run
 against a staging environment pointed at its own database
-(`database.url` distinct from production):
+(`database.url` distinct from production). See
+[`STAGING_VALIDATION.md`](STAGING_VALIDATION.md) for the full checklist
+(fresh install, migration verification, backup/restore drill, first
+collector activation, lead review) with expected outcomes spelled out for
+each step; the summary below is the same flow condensed:
 
 1. Validate configuration loads and is internally consistent:
 

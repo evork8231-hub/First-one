@@ -138,6 +138,7 @@ layout and how to run a subset.
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) -- every configuration surface (YAML, env vars, rule files)
 - [`docs/COLLECTORS.md`](docs/COLLECTORS.md) -- what each collector reads, requires, and does not fabricate
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) -- running the platform as a long-lived service
+- [`docs/STAGING_VALIDATION.md`](docs/STAGING_VALIDATION.md) -- checklist for proving the system works safely before enabling real collectors
 - [`docs/TESTING.md`](docs/TESTING.md) -- test layout, fixtures/fakes, coverage
 - [`docs/FOLDER_OVERVIEW.md`](docs/FOLDER_OVERVIEW.md) -- what lives where and why
 

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import app.collectors.ehitisregister_collector as ehr_module
 import app.collectors.ilmateenistus_collector as ilm_module
 import app.collectors.real_estate.base_listing_collector as base_listing_module
 import httpx
 import pytest
+from alembic import command as alembic_command
+from alembic.config import Config
 from app.application.services.collector_lifecycle_service import CollectorLifecycleService
 from app.cli.main import app
 from app.collectors.http_client import HttpClient
@@ -30,6 +33,25 @@ from typer.testing import CliRunner
 from tests.fixtures.factories import make_lead, make_signal, make_weather_event
 
 runner = CliRunner()
+
+
+def _repo_root() -> Path:
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "alembic.ini").exists():
+            return candidate
+    raise FileNotFoundError("Could not locate alembic.ini above the tests package.")
+
+
+def _stamp_at_revision_0001(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Migrate ``db_path`` to revision 0001 only, leaving it one migration behind head --
+    used to exercise 'sigint db migration-status' reporting a database that is not
+    yet up to date, the same scenario a paused/partial upgrade would leave behind.
+    """
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    repo_root = _repo_root()
+    cfg = Config(str(repo_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(repo_root / "alembic"))
+    alembic_command.upgrade(cfg, "0001")
 
 
 def _seed_signal(db_path: Path, **overrides: object) -> None:
@@ -1428,3 +1450,175 @@ def test_rollback_signals_reports_a_database_error_without_a_raw_traceback(
     assert isinstance(
         result.exception, SystemExit
     ), "must exit cleanly, never crash with a raw traceback"
+
+
+def test_db_check_reports_not_migrated_before_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "unmigrated.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+
+    result = runner.invoke(app, ["db", "check"])
+
+    assert result.exit_code == 1, result.output
+    assert "never been migrated" in result.output
+
+
+def test_db_check_reports_healthy_after_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "healthy.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["db", "check"])
+
+    assert result.exit_code == 0, result.output
+    assert "reachable and healthy" in result.output
+
+
+def test_db_migration_status_reports_up_to_date_after_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "current.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["db", "migration-status"])
+
+    assert result.exit_code == 0, result.output
+    assert "up to date" in result.output
+    assert "0002" in result.output
+
+
+def test_db_migration_status_reports_pending_migrations_when_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "behind.db"
+    _stamp_at_revision_0001(db_path, monkeypatch)
+
+    result = runner.invoke(app, ["db", "migration-status"])
+
+    assert result.exit_code == 1, result.output
+    assert "0001" in result.output
+    assert "0002" in result.output
+    assert "Pending migration(s)" in result.output
+
+
+def test_db_migration_status_reports_never_migrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "unmigrated.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+
+    result = runner.invoke(app, ["db", "migration-status"])
+
+    assert result.exit_code == 1, result.output
+    assert "never been migrated" in result.output
+
+
+def test_collector_status_lists_every_registered_collector_as_discovered_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "collector_status.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["collector-status"])
+
+    assert result.exit_code == 0, result.output
+    assert "ehitisregister" in result.output
+    assert "ilmateenistus" in result.output
+    assert "discovered" in result.output
+
+
+def test_collector_status_reflects_a_verified_and_enabled_collector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "collector_status.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SIGINT_COLLECTORS__ENABLED", '["ehitisregister"]')
+    runner.invoke(app, ["init"])
+    _mark_collector_verified(db_path, "ehitisregister")
+
+    result = runner.invoke(app, ["collector-status"])
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    ehr_line = next(line for line in lines if "ehitisregister" in line and "xtee" not in line)
+    assert "verified" in ehr_line
+    assert "yes" in ehr_line
+
+
+def test_inspect_lead_shows_full_detail_and_supporting_signals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "inspect_lead.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    session_factory = sessionmaker(bind=engine)
+    signal_repo = SQLiteSignalRepository(session_factory)
+    first = signal_repo.add(make_signal(source="ehitisregister"))
+    second = signal_repo.add(make_signal(source="kv_ee"))
+    lead = SQLiteLeadRepository(session_factory).add(
+        make_lead(supporting_signal_ids=[first.id, second.id])
+    )
+
+    result = runner.invoke(app, ["inspect-lead", str(lead.id)])
+
+    assert result.exit_code == 0, result.output
+    assert str(lead.id) in result.output
+    assert lead.lead_type.value in result.output
+    assert "unverified" in result.output
+    assert str(first.id) in result.output
+    assert str(second.id) in result.output
+    assert "ehitisregister" in result.output
+    assert "kv_ee" in result.output
+    assert "2/2 found" in result.output
+
+
+def test_inspect_lead_reports_a_missing_lead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "inspect_lead.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    result = runner.invoke(app, ["inspect-lead", "00000000-0000-0000-0000-000000000000"])
+
+    assert result.exit_code == 1, result.output
+    assert "No lead found" in result.output
+
+
+def test_inspect_lead_rejects_an_invalid_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SIGINT_DATABASE__URL", "sqlite:///:memory:")
+    result = runner.invoke(app, ["inspect-lead", "not-a-uuid"])
+    assert result.exit_code == 2, result.output
+
+
+def test_inspect_lead_flags_a_supporting_signal_missing_from_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Lead's supporting_signal_ids are not a database foreign key -- a Signal cited by
+    a Lead can later be deleted (rollback/purge both refuse this while a Lead still cites
+    it, but a hand-edited or pre-existing database might not honor that). inspect-lead
+    must surface this rather than silently showing fewer signals than the Lead claims.
+    """
+    db_path = tmp_path / "inspect_lead.db"
+    monkeypatch.setenv("SIGINT_DATABASE__URL", f"sqlite:///{db_path}")
+    runner.invoke(app, ["init"])
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    session_factory = sessionmaker(bind=engine)
+    existing_signal = SQLiteSignalRepository(session_factory).add(make_signal())
+    lead = SQLiteLeadRepository(session_factory).add(
+        make_lead(supporting_signal_ids=[existing_signal.id, uuid4()])
+    )
+
+    result = runner.invoke(app, ["inspect-lead", str(lead.id)])
+
+    assert result.exit_code == 0, result.output
+    assert "1/2 found" in result.output
+    assert "no longer exist in storage" in result.output
