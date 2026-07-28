@@ -26,6 +26,14 @@ class LeadModel(Base):
         enum_column(ServiceCategory, length=32), nullable=False, index=True
     )
     supporting_signal_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    #: sha256(lead_type + sorted supporting_signal_ids) -- see
+    #: app.domain.lead.compute_lead_identity_key. A real, database-level
+    #: unique constraint (not just an application-level check) so two
+    #: concurrent processes racing to persist a Lead for the exact same
+    #: evidence can never both succeed -- the second insert raises
+    #: IntegrityError, which SQLiteLeadRepository.add() catches and
+    #: resolves by returning the Lead that won the race.
+    identity_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     country: Mapped[Country] = mapped_column(enum_column(Country, length=2), nullable=False)
     county: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     municipality: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -52,6 +60,7 @@ class LeadModel(Base):
             id=lead.id,
             lead_type=lead.lead_type,
             supporting_signal_ids=[str(signal_id) for signal_id in lead.supporting_signal_ids],
+            identity_key=lead.identity_key,
             country=lead.country,
             county=lead.county,
             municipality=lead.municipality,

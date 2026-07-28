@@ -86,14 +86,15 @@ def test_generate_from_matches_creates_a_new_lead_for_genuinely_new_evidence() -
     assert len(audit_repo.list_all(event_type=AuditEventType.LEAD_GENERATED, limit=10)) == 2
 
 
-def test_no_repository_level_uniqueness_constraint_exists() -> None:
-    """Confirms the audit's claim directly: LeadRepository.add() itself has no uniqueness
-    check -- persisting two distinct Lead records (different ids) with identical
-    lead_type/supporting_signal_ids content both succeed via add() alone. Idempotency is
-    therefore a LeadGenerationService responsibility (the find_by_identity check), not
-    something the repository or a database constraint already enforced -- this is exactly
-    why the old LeadGenerationService (unconditional add() per candidate, no check) was able
-    to duplicate Leads in the first place.
+def test_repository_level_add_enforces_uniqueness_even_without_a_pre_check() -> None:
+    """LeadRepository.add() itself now enforces identity uniqueness (a real unique
+    database constraint in SQLiteLeadRepository, mirrored here for the in-memory double)
+    -- calling add() twice with two distinct Lead records (different ids) that share the
+    same lead_type/supporting_signal_ids returns the SAME (first) Lead both times, rather
+    than creating a duplicate. This is what closes the concurrency race
+    LeadGenerationService's find_by_identity pre-check alone could not: two callers can
+    both pass that check before either calls add(), but add() itself is now the actual
+    safety net.
     """
     lead_repo = InMemoryLeadRepository()
     shared_signal_ids = make_lead().supporting_signal_ids
@@ -101,7 +102,8 @@ def test_no_repository_level_uniqueness_constraint_exists() -> None:
     second = make_lead(supporting_signal_ids=shared_signal_ids)
     assert first.id != second.id  # two distinct records, identical business content
 
-    lead_repo.add(first)
-    lead_repo.add(second)
+    stored_first = lead_repo.add(first)
+    stored_second = lead_repo.add(second)
 
-    assert lead_repo.count() == 2, "the repository layer alone does not prevent duplicates"
+    assert lead_repo.count() == 1, "add() must not create a second Lead for the same identity"
+    assert stored_second.id == stored_first.id, "the losing add() must return the existing Lead"

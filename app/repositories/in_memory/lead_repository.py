@@ -8,7 +8,7 @@ from uuid import UUID
 from app.application.interfaces.repositories import LeadRepository
 from app.core.exceptions import EntityNotFoundError
 from app.domain.enums import ServiceCategory, VerificationStatus
-from app.domain.lead import Lead
+from app.domain.lead import Lead, compute_lead_identity_key
 
 
 class InMemoryLeadRepository(LeadRepository):
@@ -18,6 +18,18 @@ class InMemoryLeadRepository(LeadRepository):
         self._leads: dict[UUID, Lead] = {}
 
     def add(self, lead: Lead) -> Lead:
+        """Persist ``lead``, or return the already-stored Lead with the same identity
+        (``lead_type`` + ``supporting_signal_ids``) if one exists.
+
+        Mirrors ``SQLiteLeadRepository.add()``'s contract (a real unique
+        constraint there; a plain identity check here, since a
+        process-local dict has no concurrent writer to race against) so
+        code exercised against this test double sees the same observable
+        behavior production does.
+        """
+        existing = self.find_by_identity(lead.lead_type, lead.supporting_signal_ids)
+        if existing is not None:
+            return existing
         self._leads[lead.id] = lead
         return lead
 
@@ -84,8 +96,8 @@ class InMemoryLeadRepository(LeadRepository):
     def find_by_identity(
         self, lead_type: ServiceCategory, supporting_signal_ids: Sequence[UUID]
     ) -> Lead | None:
-        wanted = set(supporting_signal_ids)
+        identity_key = compute_lead_identity_key(lead_type, supporting_signal_ids)
         for lead in self._leads.values():
-            if lead.lead_type == lead_type and set(lead.supporting_signal_ids) == wanted:
+            if lead.identity_key == identity_key:
                 return lead
         return None

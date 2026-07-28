@@ -9,6 +9,8 @@ support the conclusion.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -22,6 +24,27 @@ from app.utils.time import utc_now
 #: The mission requires leads to be generated only after *multiple* verified
 #: signals support the conclusion -- a single signal is never sufficient.
 MIN_SUPPORTING_SIGNALS = 2
+
+
+def compute_lead_identity_key(
+    lead_type: ServiceCategory, supporting_signal_ids: Sequence[UUID]
+) -> str:
+    """Return a deterministic identity for a Lead, independent of id ordering.
+
+    Two Leads represent the same real-world opportunity if they share a
+    ``lead_type`` and reference the exact same *set* of supporting
+    Signals -- regardless of what order those ids happen to be listed
+    in (``[3, 1, 2]`` and ``[2, 3, 1]`` must produce the same key). This
+    mirrors ``app.verification.weather_bridge_dedup.compute_fingerprint``'s
+    same "stable fingerprint of business identity" approach, and is what
+    ``LeadModel.identity_key`` (a real, database-level unique column --
+    see ``app.database.models.lead_model``) is populated from, so two
+    concurrently-persisted Leads for the same evidence can never both
+    commit.
+    """
+    sorted_ids = sorted(str(signal_id) for signal_id in supporting_signal_ids)
+    raw = f"{lead_type.value}|{','.join(sorted_ids)}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class Lead(BaseModel):
@@ -97,3 +120,8 @@ class Lead(BaseModel):
     def with_verification(self, status: VerificationStatus) -> Lead:
         """Return a copy of this lead with its verification status updated."""
         return self.model_copy(update={"verification_status": status})
+
+    @property
+    def identity_key(self) -> str:
+        """This Lead's deterministic identity -- see :func:`compute_lead_identity_key`."""
+        return compute_lead_identity_key(self.lead_type, self.supporting_signal_ids)
