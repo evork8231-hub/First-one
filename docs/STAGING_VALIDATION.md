@@ -8,6 +8,10 @@ production. It assumes staging points at its own database
 narrative detail. Every command below is read-only or dry-run unless
 explicitly noted.
 
+For the literal, step-by-step version of this same checklist -- exact
+command, exact expected output, what a deviation means, and whether it
+blocks progress -- see [`STAGING_RUNBOOK.md`](STAGING_RUNBOOK.md).
+
 Four operator commands exist specifically to make this checklist provable
 without hand-querying the database:
 
