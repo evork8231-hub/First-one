@@ -126,11 +126,15 @@ def test_interrupted_collection_run_cannot_create_duplicate_weather_signals(
     exactly once by a later, successful retry -- never twice.
 
     Before this fix, WeatherSignalBridgeService wrote the Signal, then marked the event as
-    bridged, then wrote the audit entry, as three separate transactions. An interruption
-    between the first and second write would leave a Signal committed with no dedup record,
-    so a retry's `is_duplicate` check would find nothing and create a second, duplicate
-    WEATHER_EVENT signal for the identical occurrence. With one atomic transaction, an
-    interrupted attempt leaves nothing committed at all, so the retry starts clean.
+    bridged, then wrote the audit entry, as three separate transactions, so an interruption
+    between the first and second write could leave a Signal committed with no dedup record
+    and let a retry create a second, duplicate WEATHER_EVENT signal for the identical
+    occurrence. This test confirms the fixed behavior end to end through the service (an
+    interrupted attempt leaves nothing committed, so the retry starts clean) -- but because
+    it injects the failure on *every* commit, it aborts on the very first write either way
+    and so cannot, by itself, distinguish this from the pre-fix multi-transaction design;
+    see ``test_bridge_events_issues_exactly_one_commit_per_batch_regardless_of_size`` below
+    for the test that actually would fail against that pre-fix design.
     """
     signal_repo = SQLiteSignalRepository(sqlite_session_factory)
     config_repo = SQLiteConfigurationRepository(sqlite_session_factory)
@@ -163,3 +167,54 @@ def test_interrupted_collection_run_cannot_create_duplicate_weather_signals(
     again = service.bridge([repeat_event])
     assert again == []
     assert signal_repo.count() == 1, "no duplicate weather signal may ever be created"
+
+
+def test_bridge_events_issues_exactly_one_commit_per_batch_regardless_of_size(
+    sqlite_session_factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A direct regression guard for the specific bug this fix closes, not just a
+    proxy for it: the pre-fix design persisted a Signal, its dedup entry, and its audit
+    entry as three separate ``session_scope`` calls (one commit each), so a crash between
+    the first and second commit left an orphan Signal with no dedup record -- reproduced by
+    running that reconstructed pre-fix write pattern against this exact commit-count check
+    and confirming it fails it (see the analysis this test formalizes: the OTHER tests in
+    this module inject a failure on *every* ``Session.commit`` call, which aborts a
+    multi-transaction design on its very first commit just as readily as it aborts this
+    module's real single-transaction design -- so those tests alone cannot distinguish "one
+    atomic transaction" from "several transactions that all happen to fail here too." This
+    test closes that gap directly, by counting transactions rather than injecting a failure.
+
+    A batch of more than one event makes the point sharply: the old design committed once
+    for the signal batch insert plus twice *per event* (mark_bridged, audit add), i.e.
+    ``1 + 2 * len(events)`` commits for a run of new events -- this asserts exactly ``1``
+    regardless of batch size, which only a true single-transaction batch write satisfies.
+    """
+    config_repo = SQLiteConfigurationRepository(sqlite_session_factory)
+    deduplicator = WeatherBridgeDeduplicator(config_repo)
+    uow = SQLiteWeatherBridgeUnitOfWork(sqlite_session_factory)
+    config = WeatherSignalBridgeConfig()
+    events = [
+        make_weather_event(),
+        make_weather_event(county="Pärnu", municipality="Pärnu"),
+    ]
+    bridged = [_build_bridged_event(deduplicator, config, event) for event in events]
+
+    commit_calls = 0
+    orig_commit = Session.commit
+
+    def _counting_commit(self: Session) -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        orig_commit(self)
+
+    monkeypatch.setattr(Session, "commit", _counting_commit)
+
+    stored = uow.bridge_events(bridged)
+
+    assert len(stored) == 2
+    assert commit_calls == 1, (
+        f"expected exactly one commit for the whole batch, got {commit_calls} -- a "
+        f"regression to per-write transactions (the pre-fix design) would show 5 here "
+        f"(1 signal batch insert + 2 writes/event * 2 events) and reintroduce the "
+        f"orphan-signal-with-no-dedup-record window this unit of work exists to close."
+    )
