@@ -46,7 +46,7 @@ company) was also found during research. **It is deliberately not
 used or referenced by any collector in this codebase** -- only the two
 official paths above are implemented.
 
-### `ehitisregister` (Open Data portal, `http_jsonld`) -- preferred, no credentials required
+### `ehitisregister` (Open Data portal, `http_jsonld`) -- CONFIRMED BROKEN as implemented; do not enable
 
 Reads Estonia's Building Registry via the state open-data portal's generic
 Dataset API. `base_url` and `dataset_slug` combine into
@@ -56,16 +56,44 @@ maps fields via `field_map` (see below).
 
 - **Uses:** `app.collectors.http_client.HttpClient` (retry, rate limiting,
   optional response caching -- see `cache_enabled`/`cache_ttl_seconds`).
-- **Known limitation:** the dataset's existence is corroborated (see
-  above), but its exact response schema was never fetched or confirmed --
-  every attempt to load the live portal or its API docs was blocked at
-  the network/gateway level in every environment this platform has been
-  built in so far, not refused by the source itself. `field_map` lists,
-  per canonical field, the candidate source JSON key names to try in
-  order -- fully operator-adjustable in `config/default.yaml` without a
-  code change, once the real schema is confirmed from a reachable
-  environment.
-- **Produces:** `SignalType.BUILDING_RECORD` signals with `default_confidence`.
+- **Confirmed broken (verified via live execution against andmed.eesti.ee,
+  staging validation, 2026-07-29)** -- two independent, stacked failures,
+  not a network-block finding like the "unverified" status this section
+  used to describe:
+  1. `dataset_slug` (`"ehitisregister"`) is sent directly as the dataset
+     id to `GET /api/datasets/{id}`, but the real API requires a UUID.
+     The slug alone 400s: `{"message":["id must be a UUID"],"error":"Bad
+     Request","statusCode":400}`. The correct id,
+     `25c1cc53-2869-41a9-a3da-6a9b365288b2`, was found via
+     `GET /api/datasets?search=ehitisregister`.
+  2. Queried by that correct UUID, the dataset's metadata lists **no
+     JSON/JSON-LD resource at all** -- its only two `distributions` are a
+     Swagger-docs link (`https://swaggerui.ehr.ee/`, format `OTHER`) and
+     an HTML access guide
+     (`https://livekluster.ehr.ee/ui/ehr/v1/infoportal/info`, format
+     `HTML`). `_discover_resource_url` will always raise `CollectorError`
+     for this dataset regardless of fix (1) -- there is no JSON resource
+     on this portal to discover, ever, for this dataset.
+- **A real, live, unauthenticated public API for this data does exist**,
+  at a different host with a different shape than this collector
+  assumes: `https://livekluster.ehr.ee/api/av/v2` (confirmed via its live
+  `openapi.json`; `components.securitySchemes` is empty and no global
+  `security` is declared). `GET /reports` lists report types including
+  `eh_ehitised` (buildings) and `hoone_energia_margised` (energy
+  certificates) -- matching this collector's two target Signal types --
+  but retrieving data is **not** a single GET: it is `POST /reports` with
+  a required `report_code` and a required `email_address`, an
+  asynchronously generated file, then `GET /files/{filename}` to download
+  it (CSV by default). Implementing against it is a deliberate, scoped
+  follow-on task, not a same-shape fix to this collector -- it needs an
+  operator decision (which email address a report request is submitted
+  under, and whether repeated `sigint collect` runs against a real
+  government system's report-ordering endpoint have rate-limit/ToS
+  implications worth designing around) plus a materially different fetch
+  pattern (order-and-poll-and-download rather than one GET). Not yet
+  implemented. Do not add `ehitisregister` to `collectors.enabled` until
+  this is resolved -- it cannot currently produce any Signals.
+- **Produces (once fixed):** `SignalType.BUILDING_RECORD` signals with `default_confidence`.
 
 ### `ehitisregister_xtee` (X-tee adapter) -- disabled by design, requires credentials this platform cannot provide
 

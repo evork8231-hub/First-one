@@ -13,20 +13,44 @@ this portal requires no credentials and no organizational registration.
 Verification status (see ``docs/COLLECTORS.md#ehitisregister`` for the
 full research record):
 
-- The dataset's existence at ``andmed.eesti.ee/datasets/ehitisregister``
-  is corroborated by multiple independent web searches (a page titled
-  "Ehitisregister" at exactly that URL), but its content was never
-  directly fetched -- every attempt to load the live portal or its API
-  docs in this environment was blocked at the network/gateway level, not
-  by the source itself refusing the request.
-- The exact JSON schema of the discovered dataset resource is
-  consequently still **unverified**. Field extraction goes through
-  ``EhitisregisterConfig.field_map`` -- a configurable, ordered list of
-  candidate source key names per canonical field -- so the mapping can be
-  corrected via configuration once the real schema is confirmed, without
-  a code change. A record missing a value under every candidate key for
-  a *required* Signal field (county, municipality) is skipped, never
-  fabricated.
+**CONFIRMED BROKEN as implemented** -- verified via live execution
+against andmed.eesti.ee during staging validation (2026-07-29), not the
+network-block finding this docstring used to describe:
+
+- ``dataset_slug`` (``"ehitisregister"``) is sent directly as the dataset
+  id to ``GET /api/datasets/{id}``, but the real API requires a UUID; the
+  slug alone 400s (``{"message":["id must be a UUID"]}``). The correct
+  id, ``25c1cc53-2869-41a9-a3da-6a9b365288b2``, was found via
+  ``GET /api/datasets?search=ehitisregister``.
+- Even queried by that correct UUID, this dataset's metadata lists no
+  JSON/JSON-LD resource at all -- its only two ``distributions`` are a
+  Swagger-docs link (``https://swaggerui.ehr.ee/``) and an HTML access
+  guide (``https://livekluster.ehr.ee/ui/ehr/v1/infoportal/info``).
+  :meth:`_discover_resource_url` will always raise ``CollectorError`` for
+  this dataset regardless of the slug/UUID issue above -- there is no
+  JSON resource on this portal to discover.
+
+A real, live, unauthenticated public API for this data exists at a
+different host with a different shape than this collector assumes:
+``https://livekluster.ehr.ee/api/av/v2`` (confirmed via its live
+``openapi.json``; no security scheme declared). Its report types include
+``eh_ehitised`` (buildings) and ``hoone_energia_margised`` (energy
+certificates) -- matching this collector's two target Signal types -- but
+retrieving data is ``POST /reports`` (requires ``report_code`` and
+``email_address``) followed by polling for an asynchronously generated
+file and downloading it via ``GET /files/{filename}``, not a single GET.
+Implementing against it is a deliberate, scoped follow-on task requiring
+an operator decision (which email address to submit report requests
+under) and a materially different fetch pattern -- not a same-shape fix
+to this class. **Do not enable this collector** (``collectors.enabled``)
+until that follow-on work lands; it cannot currently produce any Signals.
+
+Field extraction goes through ``EhitisregisterConfig.field_map`` -- a
+configurable, ordered list of candidate source key names per canonical
+field -- so the mapping can be corrected via configuration without a code
+change, once a working fetch path exists. A record missing a value under
+every candidate key for a *required* Signal field (county, municipality)
+is skipped, never fabricated.
 """
 
 from __future__ import annotations
